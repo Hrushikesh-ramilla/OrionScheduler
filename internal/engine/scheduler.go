@@ -52,3 +52,33 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 	}
 	return nil
 }
+
+func (s *Scheduler) Complete(taskID string) {
+	task, exists := s.tasks[taskID]
+	if !exists {
+		return
+	}
+
+	task.Status = models.StatusCompleted
+	log.Println("task completed:", taskID)
+
+	// Unlock dependents
+	for _, depID := range s.dependents[taskID] {
+		s.inDegree[depID]--
+		if s.inDegree[depID] == 0 {
+			depTask := s.tasks[depID]
+			depTask.Status = models.StatusReady
+			s.readyQueue.Enqueue(depTask)
+			log.Println("task ready:", depID)
+		}
+	}
+}
+
+func (s *Scheduler) PopReady() *models.Task {
+	if s.readyQueue.Len() == 0 {
+		return nil
+	}
+	task := s.readyQueue.Dequeue()
+	task.Status = models.StatusRunning
+	return task
+}
