@@ -41,13 +41,16 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			close(s.taskChan)
 			return
 		case <-ticker.C:
 			s.mu.Lock()
-			for s.readyQueue.Len() > 0 {
-				task := s.readyQueue.Dequeue()
-				task.Status = models.StatusRunning
-				s.taskChan <- task
+			if s.readyQueue.Len() > 0 {
+				for s.readyQueue.Len() > 0 {
+					task := s.readyQueue.Dequeue()
+					task.Status = models.StatusRunning
+					s.taskChan <- task
+				}
 			}
 			s.mu.Unlock()
 		}
@@ -58,6 +61,7 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	log.Println("SCHED: ingest")
 	for i := range tasks {
 		t := &tasks[i]
 		if _, exists := s.tasks[t.ID]; exists {
