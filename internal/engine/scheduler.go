@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -80,7 +81,8 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 		if s.inDegree[t.ID] == 0 {
 			t.Status = models.StatusReady
 			s.readyQueue.Enqueue(t)
-			log.Println("task ready:", t.ID)
+			log.Println("SCHED: task ready")
+			slog.Info("task ready", "task_id", t.ID, "reason", "no_dependencies")
 		}
 	}
 	return nil
@@ -92,11 +94,13 @@ func (s *Scheduler) Complete(taskID string) {
 
 	task, exists := s.tasks[taskID]
 	if !exists {
+		slog.Warn("attempted to complete unknown task", "task_id", taskID)
 		return
 	}
 
 	task.Status = models.StatusCompleted
-	log.Println("task completed:", taskID)
+	log.Println("SCHED: complete")
+	slog.Info("task completed", "task_id", taskID)
 
 	for _, depID := range s.dependents[taskID] {
 		s.inDegree[depID]--
@@ -104,7 +108,8 @@ func (s *Scheduler) Complete(taskID string) {
 			depTask := s.tasks[depID]
 			depTask.Status = models.StatusReady
 			s.readyQueue.Enqueue(depTask)
-			log.Println("task ready:", depID)
+			log.Println("SCHED: task ready")
+			slog.Info("task ready", "task_id", depID, "reason", "deps_satisfied")
 		}
 	}
 }
