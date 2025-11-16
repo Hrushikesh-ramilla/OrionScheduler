@@ -1,29 +1,62 @@
 ﻿package engine
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"go-enterprise-scheduler/pkg/models"
 )
 
 type Scheduler struct {
+	mu         sync.Mutex
 	tasks      map[string]*models.Task
 	inDegree   map[string]int
 	dependents map[string][]string
 	readyQueue *PriorityQueue
+	taskChan   chan *models.Task
 }
 
-func newScheduler() *Scheduler {
+func NewScheduler() *Scheduler {
 	return &Scheduler{
 		tasks:      make(map[string]*models.Task),
 		inDegree:   make(map[string]int),
 		dependents: make(map[string][]string),
 		readyQueue: NewPriorityQueue(),
+		taskChan:   make(chan *models.Task, 100),
+	}
+}
+
+func (s *Scheduler) Start(ctx context.Context) {
+	go s.runLoop(ctx)
+}
+
+func (s *Scheduler) runLoop(ctx context.Context) {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			for s.readyQueue.Len() > 0 {
+				task := s.readyQueue.Dequeue()
+				task.Status = models.StatusRunning
+				s.taskChan <- task
+			}
+			s.mu.Unlock()
+		}
 	}
 }
 
 func (s *Scheduler) Ingest(tasks []models.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for i := range tasks {
 		t := &tasks[i]
 		if _, exists := s.tasks[t.ID]; exists {
@@ -54,6 +87,9 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 }
 
 func (s *Scheduler) Complete(taskID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	task, exists := s.tasks[taskID]
 	if !exists {
 		return
@@ -62,7 +98,6 @@ func (s *Scheduler) Complete(taskID string) {
 	task.Status = models.StatusCompleted
 	log.Println("task completed:", taskID)
 
-	// Unlock dependents
 	for _, depID := range s.dependents[taskID] {
 		s.inDegree[depID]--
 		if s.inDegree[depID] == 0 {
@@ -74,11 +109,22 @@ func (s *Scheduler) Complete(taskID string) {
 	}
 }
 
-func (s *Scheduler) PopReady() *models.Task {
-	if s.readyQueue.Len() == 0 {
-		return nil
+func (s *Scheduler) TaskChan() <-chan *models.Task {
+	return s.taskChan
+}
+
+func (s *Scheduler) Metrics() (pending, running, completed int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.tasks {
+		switch t.Status {
+		case models.StatusPending, models.StatusReady:
+			pending++
+		case models.StatusRunning:
+			running++
+		case models.StatusCompleted:
+			completed++
+		}
 	}
-	task := s.readyQueue.Dequeue()
-	task.Status = models.StatusRunning
-	return task
+	return
 }
