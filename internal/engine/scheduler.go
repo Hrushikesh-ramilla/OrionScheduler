@@ -10,6 +10,11 @@ import (
 	"go-enterprise-scheduler/pkg/models"
 )
 
+type ingestReq struct {
+	tasks []models.Task
+	resp  chan error
+}
+
 type Scheduler struct {
 	mu         sync.Mutex
 	tasks      map[string]*models.Task
@@ -17,13 +22,8 @@ type Scheduler struct {
 	dependents map[string][]string
 	readyQueue *PriorityQueue
 	taskChan   chan *models.Task
-	ingestChan chan ingestReq
+	ingestChan   chan ingestReq
 	completeChan chan string
-}
-
-type ingestReq struct {
-	tasks []models.Task
-	resp  chan error
 }
 
 func NewScheduler() *Scheduler {
@@ -47,20 +47,22 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 		select {
 		case req := <-s.ingestChan:
 			s.handleIngest(req)
+			s.dispatchReady()
 		case taskID := <-s.completeChan:
 			s.handleComplete(taskID)
+			s.dispatchReady()
 		case <-ctx.Done():
 			close(s.taskChan)
 			return
 		}
-		// Push ready tasks after each event
-		s.mu.Lock()
-		for s.readyQueue.Len() > 0 {
-			task := s.readyQueue.Dequeue()
-			task.Status = models.StatusRunning
-			s.taskChan <- task
-		}
-		s.mu.Unlock()
+	}
+}
+
+func (s *Scheduler) dispatchReady() {
+	for s.readyQueue.Len() > 0 {
+		task := s.readyQueue.Dequeue()
+		task.Status = models.StatusRunning
+		s.taskChan <- task
 	}
 }
 
