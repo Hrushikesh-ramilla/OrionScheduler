@@ -25,12 +25,12 @@ func NewScheduler() *Scheduler {
 		inDegree:   make(map[string]int),
 		dependents: make(map[string][]string),
 		readyQueue: NewPriorityQueue(),
-		readyChan:  make(chan *models.Task),
+		readyChan:  make(chan *models.Task, 64), // buffered to avoid deadlock
 	}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	// No event loop needed â€” mutex protects everything
+	// mutex model â€” no event loop
 }
 
 func (s *Scheduler) Ingest(tasks []models.Task) error {
@@ -58,11 +58,8 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 		if s.inDegree[t.ID] == 0 {
 			t.Status = models.StatusReady
 			s.readyQueue.Enqueue(t)
-			log.Println("SCHED: task ready")
-			slog.Info("task ready", "task_id", t.ID, "reason", "no_dependencies")
 		}
 	}
-	// Dispatch ready tasks while holding the lock
 	s.dispatchLocked()
 	return nil
 }
@@ -71,9 +68,15 @@ func (s *Scheduler) dispatchLocked() {
 	for s.readyQueue.Len() > 0 {
 		task := s.readyQueue.Dequeue()
 		task.Status = models.StatusRunning
-		// BUG: this blocks while holding s.mu â€” if readyChan is full
-		// and worker calls Complete() which also needs s.mu â†’ DEADLOCK
-		s.readyChan <- task
+		select {
+		case s.readyChan <- task:
+		default:
+			// channel full â€” put back and try later
+			// NOTE: this is still broken under real concurrency
+			s.readyQueue.Enqueue(task)
+			task.Status = models.StatusReady
+			return
+		}
 	}
 }
 
@@ -81,12 +84,8 @@ func (s *Scheduler) Complete(taskID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	log.Println("SCHED: complete")
 	task, exists := s.tasks[taskID]
-	if !exists {
-		slog.Warn("attempted to complete unknown task", "task_id", taskID)
-		return
-	}
+	if !exists { return }
 	task.Status = models.StatusCompleted
 	slog.Info("task completed", "task_id", taskID)
 	for _, depID := range s.dependents[taskID] {
@@ -95,8 +94,6 @@ func (s *Scheduler) Complete(taskID string) {
 			depTask := s.tasks[depID]
 			depTask.Status = models.StatusReady
 			s.readyQueue.Enqueue(depTask)
-			log.Println("SCHED: task ready")
-			slog.Info("task ready", "task_id", depID, "reason", "deps_satisfied")
 		}
 	}
 	s.dispatchLocked()
