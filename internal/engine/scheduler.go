@@ -10,97 +10,42 @@ import (
 	"go-enterprise-scheduler/pkg/models"
 )
 
-type ingestReq struct {
-	tasks []models.Task
-	resp  chan error
-}
-
 type Scheduler struct {
 	mu         sync.Mutex
 	tasks      map[string]*models.Task
 	inDegree   map[string]int
 	dependents map[string][]string
 	readyQueue *PriorityQueue
-	taskChan   chan *models.Task
-	ingestChan   chan ingestReq
-	completeChan chan string
-	popReqChan   chan chan *models.Task
+	readyChan  chan *models.Task
 }
 
 func NewScheduler() *Scheduler {
 	return &Scheduler{
-		tasks:        make(map[string]*models.Task),
-		inDegree:     make(map[string]int),
-		dependents:   make(map[string][]string),
-		readyQueue:   NewPriorityQueue(),
-		taskChan:     make(chan *models.Task),
-		ingestChan:   make(chan ingestReq),
-		completeChan: make(chan string),
-		popReqChan:   make(chan chan *models.Task),
+		tasks:      make(map[string]*models.Task),
+		inDegree:   make(map[string]int),
+		dependents: make(map[string][]string),
+		readyQueue: NewPriorityQueue(),
+		readyChan:  make(chan *models.Task),
 	}
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
-	go s.runLoop(ctx)
-	go s.pushLoop(ctx)
+	// No event loop needed â€” mutex protects everything
 }
 
-func (s *Scheduler) runLoop(ctx context.Context) {
-	for {
-		var activePopReq chan chan *models.Task
-		if s.readyQueue.Len() > 0 {
-			activePopReq = s.popReqChan
-		}
-		select {
-		case req := <-activePopReq:
-			task := s.readyQueue.Dequeue()
-			task.Status = models.StatusRunning
-			req <- task
-		case req := <-s.ingestChan:
-			s.handleIngest(req)
-		case taskID := <-s.completeChan:
-			s.handleComplete(taskID)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
+func (s *Scheduler) Ingest(tasks []models.Task) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-func (s *Scheduler) pushLoop(ctx context.Context) {
-	defer close(s.taskChan)
-	for {
-		req := make(chan *models.Task, 1)
-		select {
-		case s.popReqChan <- req:
-		case <-ctx.Done():
-			return
-		}
-		select {
-		case task := <-req:
-			if task != nil {
-				select {
-				case s.taskChan <- task:
-				case <-ctx.Done():
-					return
-				}
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (s *Scheduler) handleIngest(req ingestReq) {
 	log.Println("SCHED: ingest")
-	for i := range req.tasks {
-		t := &req.tasks[i]
+	for i := range tasks {
+		t := &tasks[i]
 		if _, exists := s.tasks[t.ID]; exists {
-			req.resp <- fmt.Errorf("scheduler: duplicate task ID %q", t.ID)
-			return
+			return fmt.Errorf("scheduler: duplicate task ID %q", t.ID)
 		}
 	}
-	for i := range req.tasks {
-		t := &req.tasks[i]
+	for i := range tasks {
+		t := &tasks[i]
 		t.Status = models.StatusPending
 		s.tasks[t.ID] = t
 		s.inDegree[t.ID] = len(t.Dependencies)
@@ -108,8 +53,8 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 			s.dependents[depID] = append(s.dependents[depID], t.ID)
 		}
 	}
-	for i := range req.tasks {
-		t := &req.tasks[i]
+	for i := range tasks {
+		t := &tasks[i]
 		if s.inDegree[t.ID] == 0 {
 			t.Status = models.StatusReady
 			s.readyQueue.Enqueue(t)
@@ -117,10 +62,25 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 			slog.Info("task ready", "task_id", t.ID, "reason", "no_dependencies")
 		}
 	}
-	req.resp <- nil
+	// Dispatch ready tasks while holding the lock
+	s.dispatchLocked()
+	return nil
 }
 
-func (s *Scheduler) handleComplete(taskID string) {
+func (s *Scheduler) dispatchLocked() {
+	for s.readyQueue.Len() > 0 {
+		task := s.readyQueue.Dequeue()
+		task.Status = models.StatusRunning
+		// BUG: this blocks while holding s.mu â€” if readyChan is full
+		// and worker calls Complete() which also needs s.mu â†’ DEADLOCK
+		s.readyChan <- task
+	}
+}
+
+func (s *Scheduler) Complete(taskID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	log.Println("SCHED: complete")
 	task, exists := s.tasks[taskID]
 	if !exists {
@@ -139,20 +99,11 @@ func (s *Scheduler) handleComplete(taskID string) {
 			slog.Info("task ready", "task_id", depID, "reason", "deps_satisfied")
 		}
 	}
-}
-
-func (s *Scheduler) Ingest(tasks []models.Task) error {
-	req := ingestReq{tasks: tasks, resp: make(chan error, 1)}
-	s.ingestChan <- req
-	return <-req.resp
-}
-
-func (s *Scheduler) Complete(taskID string) {
-	s.completeChan <- taskID
+	s.dispatchLocked()
 }
 
 func (s *Scheduler) ReadyTasks() <-chan *models.Task {
-	return s.taskChan
+	return s.readyChan
 }
 
 func (s *Scheduler) Metrics() (pending, running, completed int) {
