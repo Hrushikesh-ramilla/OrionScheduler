@@ -39,6 +39,9 @@ func main() {
 	scheduler.Start(ctx)
 	slog.Info("DAG scheduler event loop started")
 
+	scheduler.StartDispatch(ctx)
+	slog.Info("DAG dispatch loop started")
+
 	dispatcher := engine.NewDispatcher(scheduler, engine.DefaultWorkerCount)
 	dispatcher.Start(ctx)
 	slog.Info("dispatcher started", "workers", engine.DefaultWorkerCount)
@@ -54,15 +57,12 @@ func main() {
 
 	go func() {
 		slog.Info("HTTP server listening", "port", 8080)
-		slog.Info("POST /api/v1/dag -> Submit a task DAG")
-		slog.Info("GET  /api/v1/status -> System metrics")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server error", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
@@ -70,15 +70,12 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
-
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("HTTP server forced shutdown", "error", err)
 	} else {
 		slog.Info("HTTP server stopped gracefully")
 	}
-
 	cancel()
 	dispatcher.Wait()
-
 	slog.Info("all systems stopped. Goodbye.")
 }
