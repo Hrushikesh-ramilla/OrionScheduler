@@ -30,7 +30,7 @@ func main() {
 	defer wal.Close()
 	slog.Info("WAL initialized", "file", walPath)
 
-	scheduler := engine.NewScheduler()
+	scheduler := engine.NewScheduler(wal)
 	slog.Info("DAG scheduler initialized")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,20 +39,26 @@ func main() {
 	scheduler.Start(ctx)
 	slog.Info("DAG scheduler event loop started")
 
-	// Replay WAL
-	entries, err := wal.Recover()
+	state, err := wal.Recover()
 	if err != nil {
 		slog.Error("WAL recovery failed", "error", err)
 		os.Exit(1)
 	}
-	if len(entries) > 0 {
-		slog.Info("recovering WAL events", "count", len(entries))
-		for _, entry := range entries {
+	if state != nil && len(state.Entries) > 0 {
+		slog.Info("recovering WAL events", "count", len(state.Entries))
+		for _, entry := range state.Entries {
 			if entry.Type == "INGEST" {
 				_ = scheduler.Ingest(entry.Tasks)
+			} else if entry.Type == "START" {
+				scheduler.ReplayStart(entry.TaskID)
+			} else if entry.Type == "COMPLETE" {
+				scheduler.ReplayComplete(entry.TaskID)
+			} else if entry.Type == "FAIL" {
+				scheduler.ReplayFail(entry.TaskID)
 			}
 		}
-		slog.Info("WAL recovery complete")
+		scheduler.RequeueOrphans(state.InProgressTasks)
+		slog.Info("WAL recovery complete", "orphans_requeued", len(state.InProgressTasks))
 	} else {
 		slog.Info("WAL is clean -- no tasks to recover")
 	}
@@ -64,7 +70,19 @@ func main() {
 	dispatcher.Start(ctx)
 	slog.Info("dispatcher started", "workers", engine.DefaultWorkerCount)
 
-	handler := api.NewHandler(scheduler, wal)
+	idemStore := api.NewIdempotencyStore()
+	if state != nil {
+		for _, entry := range state.Entries {
+			if entry.Type == "REQUEST" {
+				idemStore.Set(entry.IdempotencyKey, api.Result{
+					Status: "accepted",
+					Response: []byte(`{"status":"duplicate request ignored (recovered)"}`),
+				})
+			}
+		}
+	}
+
+	handler := api.NewHandler(scheduler, wal, idemStore)
 	server := &http.Server{
 		Addr:         ":8080",
 		Handler:      handler,
@@ -76,7 +94,10 @@ func main() {
 	go func() {
 		slog.Info("HTTP server listening", "port", 8080)
 		slog.Info("POST /api/v1/dag -> Submit a task DAG")
-		slog.Info("GET  /api/v1/status -> System metrics")
+		slog.Info("GET /api/v1/status -> System metrics")
+		slog.Info("GET /healthz -> Liveness probe")
+		slog.Info("GET /readyz -> Readiness probe")
+		slog.Info("GET /metrics -> Prometheus metrics")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server error", "error", err)
 			os.Exit(1)
