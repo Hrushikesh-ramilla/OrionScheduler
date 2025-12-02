@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go-enterprise-scheduler/internal/storage"
+	"go-enterprise-scheduler/pkg/models"
 	"go-enterprise-scheduler/pkg/telemetry"
 )
 
@@ -103,6 +104,13 @@ func (d *Dispatcher) worker(ctx context.Context, id int) {
 			if err := d.wal.AppendStart(task.ID); err != nil {
 				slog.Error("failed to write start event to WAL", "worker_id", id, "error", err)
 			}
+
+			d.scheduler.emitEvent(models.TaskEvent{
+				Type:      models.EventTaskStarted,
+				TaskID:    task.ID,
+				WorkerID:  id,
+				Timestamp: time.Now(),
+			})
 
 			slog.Info("executing task", "worker_id", id, "task_id", task.ID, "payload", task.Payload)
 
