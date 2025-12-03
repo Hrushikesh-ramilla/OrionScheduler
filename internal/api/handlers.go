@@ -31,16 +31,18 @@ type Handler struct {
 	mu        sync.Mutex
 	clients   map[string]*rate.Limiter
 	idemStore *IdempotencyStore
+	hub       *Hub
 }
 
 // NewHandler creates a Handler and returns a configured http.ServeMux
 // with all API routes registered.
-func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *IdempotencyStore) http.Handler {
+func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *IdempotencyStore, hub *Hub) http.Handler {
 	h := &Handler{
 		scheduler: scheduler,
 		wal:       wal,
 		clients:   make(map[string]*rate.Limiter),
 		idemStore: idemStore,
+		hub:       hub,
 	}
 
 	mux := http.NewServeMux()
@@ -59,6 +61,9 @@ func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *Idempo
 
 	// GET /metrics — Prometheus metrics endpoint natively scraped
 	mux.Handle("/metrics", promhttp.Handler())
+
+	// GET /ws — WebSocket endpoint for real-time event streaming
+	mux.HandleFunc("/ws", hub.HandleWS)
 
 	return mux
 }

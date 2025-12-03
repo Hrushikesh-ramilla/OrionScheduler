@@ -13,13 +13,13 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for now, tighten in production
+		return true // Allow all origins; tighten via CORS in production
 	},
 }
 
-// Hub maintains active WebSocket connections and broadcasts events.
+// Hub maintains active WebSocket connections and broadcasts task events.
 type Hub struct {
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	clients map[*websocket.Conn]bool
 }
 
@@ -43,17 +43,23 @@ func (h *Hub) Run(eventChan <-chan models.TaskEvent) {
 	}
 }
 
+// broadcast sends a message to every connected client. Clients that
+// fail to receive are removed immediately. Uses a full Mutex because
+// gorilla/websocket does not support concurrent writes to a single conn.
 func (h *Hub) broadcast(msg []byte) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
+	var dead []*websocket.Conn
 	for conn := range h.clients {
 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 			slog.Warn("ws write failed, removing client", "error", err)
 			conn.Close()
-			// Mark for removal — can't delete during iteration with RLock
-			go h.removeClient(conn)
+			dead = append(dead, conn)
 		}
+	}
+	for _, conn := range dead {
+		delete(h.clients, conn)
 	}
 }
 
@@ -67,11 +73,21 @@ func (h *Hub) addClient(conn *websocket.Conn) {
 func (h *Hub) removeClient(conn *websocket.Conn) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.clients, conn)
-	slog.Info("ws client disconnected", "total", len(h.clients))
+	if h.clients[conn] {
+		delete(h.clients, conn)
+		conn.Close()
+		slog.Info("ws client disconnected", "total", len(h.clients))
+	}
 }
 
-// HandleWS upgrades an HTTP connection to WebSocket and adds it to the hub.
+// ClientCount returns the number of active WebSocket clients.
+func (h *Hub) ClientCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.clients)
+}
+
+// HandleWS upgrades an HTTP connection to WebSocket and registers it with the hub.
 func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -81,10 +97,9 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 	h.addClient(conn)
 
 	// Read loop — we don't expect messages from clients, but we need
-	// to read to detect disconnects and process control frames.
+	// to read to detect disconnects and process control frames (ping/pong).
 	go func() {
 		defer h.removeClient(conn)
-		defer conn.Close()
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
 				break
