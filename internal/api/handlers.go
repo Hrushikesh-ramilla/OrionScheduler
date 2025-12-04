@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -65,7 +66,29 @@ func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *Idempo
 	// GET /ws — WebSocket endpoint for real-time event streaming
 	mux.HandleFunc("/ws", hub.HandleWS)
 
-	return mux
+	return corsMiddleware(mux)
+}
+
+// corsMiddleware adds CORS headers to all responses. In development,
+// it allows all origins. In production, set CORS_ORIGIN env var.
+func corsMiddleware(next http.Handler) http.Handler {
+	allowOrigin := os.Getenv("CORS_ORIGIN")
+	if allowOrigin == "" {
+		allowOrigin = "*"
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) getLimiter(ip string) *rate.Limiter {
