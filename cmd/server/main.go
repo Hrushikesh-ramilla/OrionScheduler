@@ -4,6 +4,10 @@
 // It wires together the storage layer (WAL), the DAG scheduling engine,
 // the worker pool dispatcher, and the REST API, then starts the HTTP
 // server on port 8080 with graceful shutdown support.
+//
+// The SchedulerManager abstraction allows the scheduler to be stopped
+// and restarted (crash simulation + WAL recovery) while the HTTP server
+// stays alive.
 package main
 
 import (
@@ -12,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -21,8 +26,8 @@ import (
 )
 
 func main() {
-	slog.Info("=== Distributed Task Orchestrator ===")
-	slog.Info("Starting up...")
+	slog.Info("=== OrionScheduler ===")
+	slog.Info("starting up...")
 
 	// -----------------------------------------------------------------
 	// 1. Initialize the Write-Ahead Log for crash recovery.
@@ -40,101 +45,63 @@ func main() {
 	slog.Info("WAL initialized", "file", walPath)
 
 	// -----------------------------------------------------------------
-	// 2. Initialize the DAG scheduler.
+	// 2. Determine worker count from env or default.
 	// -----------------------------------------------------------------
-	scheduler := engine.NewScheduler(wal)
-	slog.Info("DAG scheduler initialized")
-
-	// -----------------------------------------------------------------
-	// 3. Create a cancellable context for graceful shutdown.
-	// -----------------------------------------------------------------
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// -----------------------------------------------------------------
-	// 4. Start the Scheduler's event loop to push tasks to workers.
-	// -----------------------------------------------------------------
-	scheduler.Start(ctx)
-	slog.Info("DAG scheduler event loop started")
-
-	// -----------------------------------------------------------------
-	// 5. Replay WAL entries from any previous crash/shutdown.
-	// -----------------------------------------------------------------
-	state, err := wal.Recover()
-	if err != nil {
-		slog.Error("WAL recovery failed", "error", err)
-		os.Exit(1)
-	}
-	if state != nil && len(state.Entries) > 0 {
-		slog.Info("recovering WAL events", "count", len(state.Entries))
-		for _, entry := range state.Entries {
-			if entry.Type == "INGEST" {
-				_ = scheduler.Ingest(entry.Tasks)
-			} else if entry.Type == "START" {
-				scheduler.ReplayStart(entry.TaskID)
-			} else if entry.Type == "COMPLETE" {
-				scheduler.ReplayComplete(entry.TaskID)
-			} else if entry.Type == "FAIL" {
-				scheduler.ReplayFail(entry.TaskID)
-			}
-		}
-		scheduler.RequeueOrphans(state.InProgressTasks)
-		slog.Info("WAL recovery complete", "orphans_requeued", len(state.InProgressTasks))
-	} else {
-		slog.Info("WAL is clean — no tasks to recover")
-	}
-
-	// -----------------------------------------------------------------
-	// 6. Start the DAG Dispatch loop to pop tasks for workers.
-	// -----------------------------------------------------------------
-	scheduler.StartDispatch(ctx)
-	slog.Info("DAG dispatch loop started")
-
-	// -----------------------------------------------------------------
-	// 7. Start the Dispatcher with a fixed worker pool.
-	// -----------------------------------------------------------------
-	dispatcher := engine.NewDispatcher(scheduler, wal, engine.DefaultWorkerCount)
-	dispatcher.Start(ctx)
-	slog.Info("dispatcher started", "workers", engine.DefaultWorkerCount)
-
-	// -----------------------------------------------------------------
-	// 8. Configure and start the HTTP server.
-	// -----------------------------------------------------------------
-	idemStore := api.NewIdempotencyStore()
-	if state != nil {
-		for _, entry := range state.Entries {
-			if entry.Type == "REQUEST" {
-				idemStore.Set(entry.IdempotencyKey, api.Result{
-					Status:   "accepted",
-					Response: []byte(`{"status":"duplicate request ignored (recovered)"}`),
-				})
-			}
+	workerCount := engine.DefaultWorkerCount
+	if wc := os.Getenv("WORKER_COUNT"); wc != "" {
+		if n, err := strconv.Atoi(wc); err == nil && n > 0 {
+			workerCount = n
 		}
 	}
 
-	// Start the WebSocket hub for real-time event broadcasting.
+	// -----------------------------------------------------------------
+	// 3. Start the scheduler via the SchedulerManager.
+	//    This creates the scheduler, replays the WAL, and starts
+	//    the dispatch loop + worker pool.
+	// -----------------------------------------------------------------
+	manager := engine.NewSchedulerManager(wal, workerCount)
+	scheduler := manager.Start()
+
+	// -----------------------------------------------------------------
+	// 4. Set up the WebSocket hub for real-time event broadcasting.
+	// -----------------------------------------------------------------
 	wsHub := api.NewHub()
 	go wsHub.Run(scheduler.EventChan)
 	slog.Info("WebSocket hub started")
 
+	// -----------------------------------------------------------------
+	// 5. Configure the HTTP server with all API routes.
+	// -----------------------------------------------------------------
+	idemStore := api.NewIdempotencyStore()
 	handler := api.NewHandler(scheduler, wal, idemStore, wsHub)
+
+	// Register admin endpoints (crash/recover) on the same mux.
+	// We need access to the underlying mux — for now, create admin
+	// handler separately and it registers on NewHandler's mux.
+	adminHandler := api.NewAdminHandler(manager, wsHub)
+
+	// Build a top-level mux that delegates to both API and admin.
+	rootMux := http.NewServeMux()
+	rootMux.Handle("/admin/", adminHandler.Mux())
+	rootMux.Handle("/", handler)
+
 	server := &http.Server{
 		Addr:         ":8080",
-		Handler:      handler,
+		Handler:      rootMux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Run the HTTP server in a separate goroutine so we can listen
-	// for OS signals on the main goroutine.
+	// Run the HTTP server in a separate goroutine.
 	go func() {
 		slog.Info("HTTP server listening", "port", 8080)
-		slog.Info("POST /api/v1/dag -> Submit a task DAG")
-		slog.Info("GET /api/v1/status -> System metrics")
-		slog.Info("GET /healthz -> Liveness probe")
-		slog.Info("GET /readyz -> Readiness probe")
-		slog.Info("GET /metrics -> Prometheus metrics")
+		slog.Info("POST /api/v1/dag     -> Submit a task DAG")
+		slog.Info("GET  /api/v1/status   -> System metrics")
+		slog.Info("GET  /api/v1/metrics/live -> Live metrics (JSON)")
+		slog.Info("GET  /ws              -> WebSocket events")
+		slog.Info("POST /admin/simulate-crash -> Crash simulation")
+		slog.Info("POST /admin/recover   -> WAL recovery")
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("HTTP server error", "error", err)
 			os.Exit(1)
@@ -142,14 +109,14 @@ func main() {
 	}()
 
 	// -----------------------------------------------------------------
-	// 9. Graceful shutdown: wait for SIGINT or SIGTERM.
+	// 6. Graceful shutdown: wait for SIGINT or SIGTERM.
 	// -----------------------------------------------------------------
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	slog.Info("received signal, initiating graceful shutdown", "signal", sig)
 
-	// Phase 1: Stop accepting new HTTP connections, allow in-flight to finish.
+	// Stop accepting new HTTP connections.
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
 
@@ -159,10 +126,8 @@ func main() {
 		slog.Info("HTTP server stopped gracefully")
 	}
 
-	// Phase 2: Cancel the dispatcher context so workers finish current tasks
-	// and then exit.
-	cancel()
-	dispatcher.Wait()
+	// Stop the scheduler + workers.
+	manager.SimulateCrash()
 
 	slog.Info("all systems stopped. Goodbye.")
 }
