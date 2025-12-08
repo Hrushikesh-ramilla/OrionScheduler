@@ -35,17 +35,19 @@ type Handler struct {
 	clients   map[string]*rate.Limiter
 	idemStore *IdempotencyStore
 	hub       *Hub
+	dagStore  *engine.DAGStore
 }
 
 // NewHandler creates a Handler and returns a configured http.ServeMux
 // with all API routes registered.
-func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *IdempotencyStore, hub *Hub) http.Handler {
+func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *IdempotencyStore, hub *Hub, dagStore *engine.DAGStore) http.Handler {
 	h := &Handler{
 		scheduler: scheduler,
 		wal:       wal,
 		clients:   make(map[string]*rate.Limiter),
 		idemStore: idemStore,
 		hub:       hub,
+		dagStore:  dagStore,
 	}
 
 	mux := http.NewServeMux()
@@ -58,6 +60,9 @@ func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *Idempo
 
 	// GET /api/v1/metrics/live — Rich metrics for frontend dashboard.
 	mux.HandleFunc("/api/v1/metrics/live", h.handleMetricsLive)
+
+	// GET /api/v1/dags — List all submitted DAGs.
+	mux.HandleFunc("/api/v1/dags", h.handleListDAGs)
 
 	// GET /healthz — Liveness probe (always 200).
 	mux.HandleFunc("/healthz", h.handleHealthz)
@@ -221,10 +226,18 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("accepted tasks into the DAG", "count", len(tasks))
 
+	// Step 3: Track the DAG for listing.
+	taskIDs := make([]string, len(tasks))
+	for i := range tasks {
+		taskIDs[i] = tasks[i].ID
+	}
+	dagID := h.dagStore.Track(taskIDs)
+
 	// Return 201 Created with a summary.
 	respData := map[string]interface{}{
 		"status":   "accepted",
 		"ingested": len(tasks),
+		"dag_id":   dagID,
 	}
 	respBytes, _ := json.Marshal(respData)
 
@@ -330,4 +343,23 @@ func (h *Handler) handleMetricsLive(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// -----------------------------------------------------------------
+// GET /api/v1/dags
+// -----------------------------------------------------------------
+// Returns a list of all submitted DAGs with their task IDs and submission time.
+func (h *Handler) handleListDAGs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	dags := h.dagStore.List()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"dags":  dags,
+		"count": len(dags),
+	})
 }
