@@ -48,6 +48,10 @@ type Scheduler struct {
 
 	readyChan     chan *models.Task
 	queueSize     atomic.Int64
+
+	// EventChan receives task lifecycle events for external consumers (WebSocket hub).
+	// Buffered and sent non-blocking so we never stall the event loop.
+	EventChan chan models.TaskEvent
 }
 
 func NewScheduler(wal *storage.WAL) *Scheduler {
@@ -67,6 +71,16 @@ func NewScheduler(wal *storage.WAL) *Scheduler {
 		replayFailChan:     make(chan string),
 		requeueOrphansChan: make(chan struct{ orphans map[string]bool; done chan struct{} }),
 		readyChan:          make(chan *models.Task),
+		EventChan:          make(chan models.TaskEvent, 100),
+	}
+}
+
+// emitEvent sends a task event to external consumers without ever blocking
+// the scheduler event loop. If the channel buffer is full, the event is dropped.
+func (s *Scheduler) emitEvent(event models.TaskEvent) {
+	select {
+	case s.EventChan <- event:
+	default:
 	}
 }
 
@@ -149,6 +163,7 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 		}
 	}
 
+	taskIDs := make([]string, 0, len(req.tasks))
 	for i := range req.tasks {
 		t := &req.tasks[i]
 		t.Status = models.StatusPending
@@ -158,6 +173,7 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 		}
 		s.tasks[t.ID] = t
 		s.inDegree[t.ID] = len(t.Dependencies)
+		taskIDs = append(taskIDs, t.ID)
 
 		for _, depID := range t.Dependencies {
 			s.dependents[depID] = append(s.dependents[depID], t.ID)
@@ -165,6 +181,12 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 	}
 
 	telemetry.TasksIngestedTotal.Add(float64(len(req.tasks)))
+
+	s.emitEvent(models.TaskEvent{
+		Type:      models.EventDAGSubmitted,
+		DAGTasks:  taskIDs,
+		Timestamp: time.Now(),
+	})
 
 	for i := range req.tasks {
 		t := &req.tasks[i]
@@ -189,11 +211,23 @@ func (s *Scheduler) handleComplete(taskID string) {
 		return
 	}
 
+	duration := float64(0)
+	if !task.EndTime.IsZero() && !task.StartTime.IsZero() {
+		duration = task.EndTime.Sub(task.StartTime).Seconds() * 1000
+	}
+
 	s.metrics.running.Add(-1)
 	s.metrics.completed.Add(1)
 	task.Status = models.StatusCompleted
 	telemetry.TasksCompletedTotal.Inc()
 	slog.Info("task completed", "task_id", taskID)
+
+	s.emitEvent(models.TaskEvent{
+		Type:      models.EventTaskCompleted,
+		TaskID:    taskID,
+		Duration:  duration,
+		Timestamp: time.Now(),
+	})
 
 	for _, depID := range s.dependents[taskID] {
 		s.inDegree[depID]--
@@ -229,10 +263,26 @@ func (s *Scheduler) handleFailure(taskID string) {
 		s.metrics.retried.Add(1)
 		task.Status = models.StatusPending
 
+		s.emitEvent(models.TaskEvent{
+			Type:      models.EventTaskRetry,
+			TaskID:    taskID,
+			Retry:     task.RetryCount,
+			MaxRetry:  task.MaxRetries,
+			Timestamp: time.Now(),
+		})
+
 		time.AfterFunc(delay, func() {
 			s.retryChan <- taskID
 		})
 	} else {
+		s.emitEvent(models.TaskEvent{
+			Type:      models.EventTaskFailed,
+			TaskID:    taskID,
+			Retry:     task.RetryCount,
+			MaxRetry:  task.MaxRetries,
+			Timestamp: time.Now(),
+		})
+
 		// Permanent failure — cascade to all downstream dependents.
 		s.propagateFailure(taskID)
 	}
@@ -243,6 +293,7 @@ func (s *Scheduler) handleFailure(taskID string) {
 func (s *Scheduler) propagateFailure(rootID string) {
 	queue := []string{rootID}
 	visited := make(map[string]bool)
+	cascadeAffected := []string{}
 
 	for len(queue) > 0 {
 		current := queue[0]
@@ -276,6 +327,7 @@ func (s *Scheduler) propagateFailure(rootID string) {
 			slog.Error("failed to persist cascade failure to WAL", "task_id", current, "error", err)
 		}
 		slog.Error("task failed permanently", "task_id", current)
+		cascadeAffected = append(cascadeAffected, current)
 
 		// Enqueue all direct dependents for cascading failure.
 		for _, depID := range s.dependents[current] {
@@ -283,6 +335,15 @@ func (s *Scheduler) propagateFailure(rootID string) {
 				queue = append(queue, depID)
 			}
 		}
+	}
+
+	if len(cascadeAffected) > 0 {
+		s.emitEvent(models.TaskEvent{
+			Type:      models.EventTaskCascade,
+			TaskID:    rootID,
+			DAGTasks:  cascadeAffected,
+			Timestamp: time.Now(),
+		})
 	}
 }
 
