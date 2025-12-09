@@ -112,7 +112,12 @@ func main() {
 		}
 	}
 
-	handler := api.NewHandler(scheduler, wal, idemStore)
+	// Start the WebSocket hub for real-time event broadcasting.
+	wsHub := api.NewHub()
+	go wsHub.Run(scheduler.EventChan)
+	slog.Info("WebSocket hub started")
+
+	handler := api.NewHandler(scheduler, wal, idemStore, wsHub)
 	server := &http.Server{
 		Addr:         ":8080",
 		Handler:      handler,
