@@ -51,6 +51,9 @@ func (a *AdminHandler) handleCrash(w http.ResponseWriter, r *http.Request) {
 	a.manager.SimulateCrash()
 	a.crashTime = time.Now()
 
+	// Close all WebSocket connections so clients detect the crash.
+	a.hub.CloseAll()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":     "crashed",
