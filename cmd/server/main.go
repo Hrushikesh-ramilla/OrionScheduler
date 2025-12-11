@@ -74,7 +74,7 @@ func main() {
 	// -----------------------------------------------------------------
 	idemStore := api.NewIdempotencyStore()
 	dagStore := engine.NewDAGStore()
-	handler := api.NewHandler(scheduler, wal, idemStore, wsHub, dagStore)
+	handler := api.NewHandler(manager, wal, idemStore, wsHub, dagStore)
 
 	// Register admin endpoints (crash/recover) on the same mux.
 	// We need access to the underlying mux — for now, create admin

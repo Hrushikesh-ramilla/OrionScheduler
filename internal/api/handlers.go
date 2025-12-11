@@ -30,7 +30,7 @@ var serverStartTime = time.Now()
 
 // Handler holds references to shared dependencies and registers HTTP routes.
 type Handler struct {
-	scheduler *engine.Scheduler
+	manager   *engine.SchedulerManager
 	wal       *storage.WAL
 	mu        sync.Mutex
 	clients   map[string]*rate.Limiter
@@ -41,9 +41,9 @@ type Handler struct {
 
 // NewHandler creates a Handler and returns a configured http.ServeMux
 // with all API routes registered.
-func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *IdempotencyStore, hub *Hub, dagStore *engine.DAGStore) http.Handler {
+func NewHandler(manager *engine.SchedulerManager, wal *storage.WAL, idemStore *IdempotencyStore, hub *Hub, dagStore *engine.DAGStore) http.Handler {
 	h := &Handler{
-		scheduler: scheduler,
+		manager:   manager,
 		wal:       wal,
 		clients:   make(map[string]*rate.Limiter),
 		idemStore: idemStore,
@@ -185,9 +185,15 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sched := h.manager.Scheduler()
+	if sched == nil {
+		http.Error(w, `{"error":"scheduler is offline or recovering"}`, http.StatusServiceUnavailable)
+		return
+	}
+
 	// Emulate true execution latency coupling without hard-blocking API concurrency maps:
 	// If internal pipeline crosses ~50 items, inject native execution backpressure.
-	for h.scheduler.QueueSize() > 50 {
+	for sched.QueueSize() > 50 {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -198,6 +204,7 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const MaxDepsPerTask = 50
+
 	for _, t := range tasks {
 		if len(t.Dependencies) > MaxDepsPerTask {
 			http.Error(w, `{"error":"too many dependencies"}`, http.StatusBadRequest)
@@ -206,7 +213,7 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const MaxQueueSize = 10000
-	if h.scheduler.QueueSize() > MaxQueueSize {
+	if sched.QueueSize() > MaxQueueSize {
 		http.Error(w, `{"error":"system overloaded"}`, http.StatusTooManyRequests)
 		return
 	}
@@ -225,7 +232,7 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Step 2: Inject into the DAG scheduler.
-	if err := h.scheduler.Ingest(tasks); err != nil {
+	if err := sched.Ingest(tasks); err != nil {
 		slog.Error("scheduler ingest failed", "error", err)
 		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
 		return
@@ -275,7 +282,13 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, running, completed, failed, retried := h.scheduler.Metrics()
+	sched := h.manager.Scheduler()
+	if sched == nil {
+		http.Error(w, `{"error":"scheduler offline"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	pending, running, completed, failed, retried := sched.Metrics()
 
 	w.Header().Set("Content-Type", "application/json")
 	resp := map[string]int{
@@ -305,7 +318,13 @@ func (h *Handler) handleHealthz(w http.ResponseWriter, r *http.Request) {
 // Kubernetes-style readiness probe. Returns 200 only if both the
 // scheduler event loop and the WAL are initialized and operational.
 func (h *Handler) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	if h.scheduler == nil || h.wal == nil {
+	sched := h.manager.Scheduler()
+	if sched == nil {
+		http.Error(w, `{"error":"scheduler offline"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	if h.wal == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(`{"status":"not ready","reason":"scheduler or WAL not initialized"}`))
@@ -328,8 +347,14 @@ func (h *Handler) handleMetricsLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, running, completed, failed, retried := h.scheduler.Metrics()
-	queueSize := h.scheduler.QueueSize()
+	sched := h.manager.Scheduler()
+	if sched == nil {
+		http.Error(w, `{"error":"scheduler offline"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	pending, running, completed, failed, retried := sched.Metrics()
+	queueSize := sched.QueueSize()
 
 	wsClients := 0
 	if h.hub != nil {
