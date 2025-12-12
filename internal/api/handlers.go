@@ -25,6 +25,8 @@ import (
 // Handler wires the HTTP routes to the engine and storage layers.
 // -----------------------------------------------------------------
 
+var serverStartTime = time.Now()
+
 // Handler holds references to shared dependencies and registers HTTP routes.
 type Handler struct {
 	scheduler *engine.Scheduler
@@ -53,6 +55,9 @@ func NewHandler(scheduler *engine.Scheduler, wal *storage.WAL, idemStore *Idempo
 
 	// GET /api/v1/status — Retrieve current system metrics.
 	mux.HandleFunc("/api/v1/status", h.handleStatus)
+
+	// GET /api/v1/metrics/live — Rich metrics for frontend dashboard.
+	mux.HandleFunc("/api/v1/metrics/live", h.handleMetricsLive)
 
 	// GET /healthz — Liveness probe (always 200).
 	mux.HandleFunc("/healthz", h.handleHealthz)
@@ -290,4 +295,39 @@ func (h *Handler) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"ready"}`))
+}
+
+// -----------------------------------------------------------------
+// GET /api/v1/metrics/live
+// -----------------------------------------------------------------
+// Returns an enriched JSON object with system metrics for the frontend
+// dashboard, including uptime, queue size, and connected clients.
+func (h *Handler) handleMetricsLive(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	pending, running, completed, failed, retried := h.scheduler.Metrics()
+	queueSize := h.scheduler.QueueSize()
+
+	wsClients := 0
+	if h.hub != nil {
+		wsClients = h.hub.ClientCount()
+	}
+
+	resp := map[string]interface{}{
+		"pending":        pending,
+		"running":        running,
+		"completed":      completed,
+		"failed":         failed,
+		"retried":        retried,
+		"queue_size":     queueSize,
+		"ws_clients":     wsClients,
+		"uptime_seconds": int(time.Since(serverStartTime).Seconds()),
+		"workers":        4, // matches DefaultWorkerCount
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
