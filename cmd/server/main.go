@@ -73,7 +73,8 @@ func main() {
 	// 5. Configure the HTTP server with all API routes.
 	// -----------------------------------------------------------------
 	idemStore := api.NewIdempotencyStore()
-	handler := api.NewHandler(scheduler, wal, idemStore, wsHub)
+	dagStore := engine.NewDAGStore()
+	handler := api.NewHandler(scheduler, wal, idemStore, wsHub, dagStore)
 
 	// Register admin endpoints (crash/recover) on the same mux.
 	// We need access to the underlying mux — for now, create admin
