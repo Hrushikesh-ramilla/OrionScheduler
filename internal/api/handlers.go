@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net"
@@ -210,6 +211,12 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate DAG structure: no cycles, at least one root node.
+	if err := validateDAG(tasks); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+
 	// Step 1: Persist to WAL before processing (write-ahead guarantee).
 	if err := h.wal.AppendIngest(tasks); err != nil {
 		slog.Error("WAL ingest failed", "error", err)
@@ -362,4 +369,69 @@ func (h *Handler) handleListDAGs(w http.ResponseWriter, r *http.Request) {
 		"dags":  dags,
 		"count": len(dags),
 	})
+}
+
+// validateDAG checks that a set of tasks forms a valid DAG:
+//   - At least one root node (no dependencies)
+//   - No cycles (topological sort must include all nodes)
+//   - All referenced dependencies exist in the task set
+func validateDAG(tasks []models.Task) error {
+	if len(tasks) == 0 {
+		return fmt.Errorf("empty task list")
+	}
+
+	// Build adjacency and in-degree maps.
+	nodes := make(map[string]bool, len(tasks))
+	inDegree := make(map[string]int, len(tasks))
+	dependents := make(map[string][]string)
+
+	for _, t := range tasks {
+		nodes[t.ID] = true
+		inDegree[t.ID] = 0
+	}
+
+	// Check dependencies exist and build in-degree counts.
+	for _, t := range tasks {
+		for _, dep := range t.Dependencies {
+			if !nodes[dep] {
+				return fmt.Errorf("task %q depends on unknown task %q", t.ID, dep)
+			}
+			inDegree[t.ID]++
+			dependents[dep] = append(dependents[dep], t.ID)
+		}
+	}
+
+	// Check for at least one root node.
+	hasRoot := false
+	var queue []string
+	for id, deg := range inDegree {
+		if deg == 0 {
+			hasRoot = true
+			queue = append(queue, id)
+		}
+	}
+	if !hasRoot {
+		return fmt.Errorf("DAG has no root nodes (all tasks have dependencies)")
+	}
+
+	// Kahn's algorithm: topological sort to detect cycles.
+	visited := 0
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		visited++
+
+		for _, dep := range dependents[current] {
+			inDegree[dep]--
+			if inDegree[dep] == 0 {
+				queue = append(queue, dep)
+			}
+		}
+	}
+
+	if visited != len(tasks) {
+		return fmt.Errorf("DAG contains a cycle (only %d of %d tasks reachable)", visited, len(tasks))
+	}
+
+	return nil
 }
