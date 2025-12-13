@@ -26,11 +26,13 @@ func NewAdminHandler(manager *engine.SchedulerManager, hub *Hub) *AdminHandler {
 	}
 }
 
-// RegisterRoutes adds admin endpoints to the given ServeMux.
-func (a *AdminHandler) RegisterRoutes(mux *http.ServeMux) {
+// Mux returns an http.Handler with all admin routes registered.
+func (a *AdminHandler) Mux() http.Handler {
+	mux := http.NewServeMux()
 	mux.HandleFunc("/admin/simulate-crash", a.handleCrash)
 	mux.HandleFunc("/admin/recover", a.handleRecover)
 	mux.HandleFunc("/admin/status", a.handleStatus)
+	return mux
 }
 
 // POST /admin/simulate-crash — kills the scheduler, workers stop.
