@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -52,6 +53,7 @@ func (h *Hub) broadcast(msg []byte) {
 
 	var dead []*websocket.Conn
 	for conn := range h.clients {
+		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 			slog.Warn("ws write failed, removing client", "error", err)
 			conn.Close()
@@ -85,6 +87,20 @@ func (h *Hub) ClientCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.clients)
+}
+
+// CloseAll terminates all active WebSocket connections.
+// Called during crash simulation to signal clients that the system is down.
+func (h *Hub) CloseAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for conn := range h.clients {
+		conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "scheduler crashed"))
+		conn.Close()
+		delete(h.clients, conn)
+	}
+	slog.Info("all ws clients disconnected (crash simulation)")
 }
 
 // HandleWS upgrades an HTTP connection to WebSocket and registers it with the hub.
