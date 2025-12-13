@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -22,6 +23,9 @@ import (
 
 // DefaultWorkerCount defines the number of concurrent workers in the pool.
 const DefaultWorkerCount = 4
+
+// demoMode slows task execution for visual demonstration.
+var demoMode = os.Getenv("DEMO_MODE") != ""
 
 // -----------------------------------------------------------------
 // Dispatcher manages the lifecycle of the worker pool.
@@ -116,6 +120,9 @@ func (d *Dispatcher) worker(ctx context.Context, id int) {
 
 			// --- Simulate task execution ---
 			execTime := time.Duration(50+rand.Intn(150)) * time.Millisecond
+			if demoMode {
+				execTime = time.Duration(2000+rand.Intn(3000)) * time.Millisecond
+			}
 			if task.Payload == "sleep" {
 				execTime = 2000 * time.Millisecond
 			}
