@@ -11,15 +11,19 @@ import ReactFlow, {
   Connection,
   Edge,
   NodeTypes,
+  Panel,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { TaskNode } from "./TaskNode";
+import { DAG_TEMPLATES } from "@/lib/templates";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 
 const nodeTypes: NodeTypes = {
   task: TaskNode,
 };
 
-const initialNodes = [
+const initialNodes: any[] = [
   {
     id: "T1",
     type: "task",
@@ -30,7 +34,7 @@ const initialNodes = [
     id: "T2",
     type: "task",
     position: { x: 250, y: 250 },
-    data: { label: "T2", payload: "work", status: "pending", priority: 1 },
+    data: { label: "T2", payload: "work", status: "pending", priority: 1, duration: undefined },
   },
 ];
 
@@ -47,8 +51,17 @@ export function DagBuilder() {
     [setEdges]
   );
 
+  const loadTemplate = (templateId: string | null) => {
+    if (!templateId) return;
+    const template = DAG_TEMPLATES[templateId];
+    if (template) {
+      setNodes(template.nodes as any);
+      setEdges(template.edges as any);
+    }
+  };
+
   return (
-    <div className="w-full h-full min-h-[600px] border rounded-lg bg-background overflow-hidden">
+    <div className="w-full h-full min-h-[600px] border-r bg-background overflow-hidden relative">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -61,10 +74,22 @@ export function DagBuilder() {
       >
         <Background gap={20} size={1} color="currentColor" className="opacity-10" />
         <Controls className="bg-background border shadow-sm" />
+        <Panel position="top-left" className="bg-background/80 backdrop-blur-md p-2 rounded-lg border shadow-sm flex items-center gap-2">
+          <Select onValueChange={loadTemplate}>
+            <SelectTrigger className="w-[200px] bg-background">
+              <SelectValue placeholder="Load Template..." />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.values(DAG_TEMPLATES).map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Panel>
         <MiniMap 
-          nodeColor={(node) => {
-            return "currentColor";
-          }}
+          nodeColor={() => "currentColor"}
           maskColor="rgba(0,0,0,0.5)"
           className="bg-background border border-border"
         />
