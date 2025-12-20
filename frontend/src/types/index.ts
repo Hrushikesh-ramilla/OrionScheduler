@@ -23,16 +23,24 @@ export interface DAGInfo {
 }
 
 export type EventType = 
-  | 'task.ingested' 
   | 'task.started' 
   | 'task.completed' 
   | 'task.failed' 
+  | 'task.cascade'
+  | 'task.retry'
+  | 'dag.submitted'
   | 'system.crash' 
-  | 'system.recover';
+  | 'system.recover'
+  | 'metrics.update';
 
 export interface TaskEvent {
   type: EventType;
-  task_id: string;
-  timestamp: string;
+  task_id?: string;
+  dag_tasks?: string[];
+  worker_id?: number;
+  duration_ms?: number;
+  retry?: number;
+  max_retry?: number;
   metadata?: Record<string, string>;
+  timestamp: string;
 }
