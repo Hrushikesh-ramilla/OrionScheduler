@@ -14,10 +14,15 @@ import ReactFlow, {
   Panel,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import { useState } from "react";
+import { toast } from "sonner";
 import { TaskNode } from "./TaskNode";
 import { DAG_TEMPLATES } from "@/lib/templates";
+import { flowToTasks } from "@/lib/dagConvert";
+import { submitDag } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Play } from "lucide-react";
 
 const nodeTypes: NodeTypes = {
   task: TaskNode,
@@ -45,6 +50,7 @@ const initialEdges: Edge[] = [
 export function DagBuilder() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const onConnect = useCallback(
     (params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)),
@@ -57,6 +63,19 @@ export function DagBuilder() {
     if (template) {
       setNodes(template.nodes as any);
       setEdges(template.edges as any);
+    }
+  };
+
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true);
+      const tasks = flowToTasks(nodes, edges);
+      await submitDag(tasks);
+      toast.success("DAG submitted successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit DAG");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -87,6 +106,10 @@ export function DagBuilder() {
               ))}
             </SelectContent>
           </Select>
+          <Button onClick={handleSubmit} disabled={isSubmitting} size="sm" className="gap-2">
+            <Play className="w-4 h-4" />
+            {isSubmitting ? "Submitting..." : "Submit DAG"}
+          </Button>
         </Panel>
         <MiniMap 
           nodeColor={() => "currentColor"}
