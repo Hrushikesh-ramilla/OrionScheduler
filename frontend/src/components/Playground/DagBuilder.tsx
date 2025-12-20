@@ -14,12 +14,14 @@ import ReactFlow, {
   Panel,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { TaskNode } from "./TaskNode";
 import { DAG_TEMPLATES } from "@/lib/templates";
 import { flowToTasks } from "@/lib/dagConvert";
 import { submitDag } from "@/lib/api";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { TaskEvent } from "@/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
@@ -56,6 +58,32 @@ export function DagBuilder() {
     (params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
+
+  const { status: wsStatus } = useWebSocket({
+    onMessage: (event: TaskEvent) => {
+      // Map backend events to our UI node state
+      if (['task.started', 'task.completed', 'task.failed', 'task.retry'].includes(event.type)) {
+        setNodes((nds) => 
+          nds.map((n) => {
+            if (n.id === event.task_id) {
+              const statusMap: any = {
+                'task.started': 'running',
+                'task.completed': 'completed',
+                'task.failed': 'failed',
+                'task.retry': 'retrying'
+              };
+              return { ...n, data: { ...n.data, status: statusMap[event.type] } };
+            }
+            return n;
+          })
+        );
+      } else if (event.type === "system.crash") {
+        toast.error("System crashed!");
+      } else if (event.type === "system.recover") {
+        toast.success("System recovered, resuming DAG...");
+      }
+    }
+  });
 
   const loadTemplate = (templateId: string | null) => {
     if (!templateId) return;
