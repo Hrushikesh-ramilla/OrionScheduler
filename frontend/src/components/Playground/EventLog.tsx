@@ -36,9 +36,10 @@ export function EventLog() {
         <span className={color}>
           {event.type.padEnd(16, " ")}
         </span>{" "}
-        {event.task_id ? <span className="text-foreground/80">TID:{event.task_id}</span> : null}
+        {event.task_id ? <span className="text-foreground/80 font-semibold">TID:{event.task_id}</span> : null}
         {event.worker_id ? <span className="text-muted-foreground ml-2">W:{event.worker_id}</span> : null}
         {event.duration_ms ? <span className="text-muted-foreground ml-2">{event.duration_ms.toFixed(0)}ms</span> : null}
+        {event.retry ? <span className="text-amber-500 ml-2">Retry:{event.retry}</span> : null}
       </div>
     );
   };
