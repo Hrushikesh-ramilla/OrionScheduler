@@ -45,7 +45,7 @@ export function EventLog() {
   };
 
   return (
-    <div className="w-full h-64 border-t bg-[#0D0D0D] flex flex-col font-mono relative">
+    <div className="w-full h-full bg-[#0D0D0D] flex flex-col font-mono relative">
       <div className="flex items-center gap-2 px-4 py-2 border-b bg-card/50 text-xs text-muted-foreground">
         <Terminal className="w-4 h-4" />
         System Event Log
