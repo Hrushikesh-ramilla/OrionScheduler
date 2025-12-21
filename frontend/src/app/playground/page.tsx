@@ -8,8 +8,9 @@ import { EventLog } from "@/components/Playground/EventLog";
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { simulateCrash, recoverSystem } from "@/lib/api";
-import { AlertOctagon, RotateCcw } from "lucide-react";
+import { AlertOctagon, RotateCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function PlaygroundPage() {
   const [isCrashed, setIsCrashed] = useState(false);
@@ -70,28 +71,53 @@ export default function PlaygroundPage() {
         </div>
       </div>
 
-      <div className="flex-1 bg-card border rounded-lg overflow-hidden shadow-sm min-h-0">
-        <ReactFlowProvider>
-          {/* @ts-ignore - shadcn resizable panel group types mismatch in v4 */}
-          <ResizablePanelGroup direction="vertical">
-            <ResizablePanel defaultSize={70}>
-              {/* @ts-ignore */}
-              <ResizablePanelGroup direction="horizontal">
-                <ResizablePanel defaultSize={75} minSize={50}>
-                  <DagBuilder />
-                </ResizablePanel>
-                <ResizableHandle withHandle />
-                <ResizablePanel defaultSize={25} minSize={20}>
-                  <NodeConfigPanel />
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={30} minSize={15}>
-              <EventLog />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </ReactFlowProvider>
+      <div className="flex-1 relative overflow-hidden">
+        <AnimatePresence>
+          {isCrashed && (
+            <motion.div 
+              initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              animate={{ opacity: 1, backdropFilter: "blur(10px)" }}
+              exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
+              transition={{ duration: 0.3 }}
+              className="absolute inset-0 z-50 flex items-center justify-center bg-destructive/20 border-destructive rounded-lg border-2 shadow-[inset_0_0_100px_rgba(239,68,68,0.2)]"
+            >
+              <motion.div 
+                initial={{ scale: 0.8 }}
+                animate={{ scale: 1 }}
+                className="bg-background/95 p-8 rounded-xl border-destructive border-2 shadow-2xl flex flex-col items-center max-w-sm text-center"
+              >
+                <div className="w-16 h-16 rounded-full bg-destructive/20 flex items-center justify-center mb-4 text-destructive">
+                  <ShieldAlert className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold font-mono text-destructive tracking-widest mb-2">SYSTEM OFFLINE</h3>
+                <p className="text-sm text-muted-foreground mb-6">The scheduler node has been gracefully terminated. Memory state is wiped. Only WAL remains.</p>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <div className="w-full h-full bg-card border rounded-lg overflow-hidden shadow-sm min-h-0">
+          <ReactFlowProvider>
+            {/* @ts-ignore - shadcn resizable panel group types mismatch in v4 */}
+            <ResizablePanelGroup direction="vertical">
+              <ResizablePanel defaultSize={70}>
+                {/* @ts-ignore */}
+                <ResizablePanelGroup direction="horizontal">
+                  <ResizablePanel defaultSize={75} minSize={50}>
+                    <DagBuilder />
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel defaultSize={25} minSize={20}>
+                    <NodeConfigPanel />
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize={30} minSize={15}>
+                <EventLog />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ReactFlowProvider>
+        </div>
       </div>
     </div>
   );
