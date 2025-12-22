@@ -50,7 +50,11 @@ const initialEdges: Edge[] = [
   { id: "e1-2", source: "T1", target: "T2", animated: true },
 ];
 
-export function DagBuilder() {
+type DagBuilderProps = {
+  onSubmitSuccess?: () => void;
+};
+
+export function DagBuilder({ onSubmitSuccess }: DagBuilderProps = {}) {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -105,6 +109,7 @@ export function DagBuilder() {
       const tasks = flowToTasks(nodes, edges);
       await submitDag(tasks);
       toast.success("DAG submitted successfully");
+      onSubmitSuccess?.();
     } catch (err: any) {
       toast.error(err.message || "Failed to submit DAG");
     } finally {
