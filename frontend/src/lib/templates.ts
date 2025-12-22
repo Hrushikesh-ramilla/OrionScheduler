@@ -19,8 +19,8 @@ export const DAG_TEMPLATES: Record<string, DagTemplate> = {
       { id: "T3", type: "task", position: { x: 250, y: 350 }, data: { label: "T3", payload: "work", status: "pending", priority: 1, duration: 1000 } },
     ],
     edges: [
-      { id: "e1", source: "T1", target: "T2", animated: true },
-      { id: "e2", source: "T2", target: "T3", animated: true },
+      { id: "e1", source: "T1", target: "T2", animated: true, type: "smoothstep" },
+      { id: "e2", source: "T2", target: "T3", animated: true, type: "smoothstep" },
     ]
   },
   diamond: {
@@ -34,10 +34,10 @@ export const DAG_TEMPLATES: Record<string, DagTemplate> = {
       { id: "Merge", type: "task", position: { x: 250, y: 350 }, data: { label: "Merge", payload: "work", status: "pending", priority: 1, duration: 1000 } },
     ],
     edges: [
-      { id: "e1", source: "Root", target: "BranchA", animated: true },
-      { id: "e2", source: "Root", target: "BranchB", animated: true },
-      { id: "e3", source: "BranchA", target: "Merge", animated: true },
-      { id: "e4", source: "BranchB", target: "Merge", animated: true },
+      { id: "e1", source: "Root", target: "BranchA", animated: true, type: "smoothstep" },
+      { id: "e2", source: "Root", target: "BranchB", animated: true, type: "smoothstep" },
+      { id: "e3", source: "BranchA", target: "Merge", animated: true, type: "smoothstep" },
+      { id: "e4", source: "BranchB", target: "Merge", animated: true, type: "smoothstep" },
     ]
   },
   complex: {
@@ -54,14 +54,14 @@ export const DAG_TEMPLATES: Record<string, DagTemplate> = {
       { id: "Report", type: "task", position: { x: 250, y: 500 }, data: { label: "Report", payload: "work", status: "pending", priority: 1, duration: 1000 } },
     ],
     edges: [
-      { id: "e1", source: "Ingest", target: "Validate", animated: true },
-      { id: "e2", source: "Validate", target: "ProcessA", animated: true },
-      { id: "e3", source: "Validate", target: "ProcessB", animated: true },
-      { id: "e4", source: "Validate", target: "ProcessC", animated: true },
-      { id: "e5", source: "ProcessA", target: "Aggregate", animated: true },
-      { id: "e6", source: "ProcessB", target: "Aggregate", animated: true },
-      { id: "e7", source: "ProcessC", target: "Aggregate", animated: true },
-      { id: "e8", source: "Aggregate", target: "Report", animated: true },
+      { id: "e1", source: "Ingest", target: "Validate", animated: true, type: "smoothstep" },
+      { id: "e2", source: "Validate", target: "ProcessA", animated: true, type: "smoothstep" },
+      { id: "e3", source: "Validate", target: "ProcessB", animated: true, type: "smoothstep" },
+      { id: "e4", source: "Validate", target: "ProcessC", animated: true, type: "smoothstep" },
+      { id: "e5", source: "ProcessA", target: "Aggregate", animated: true, type: "smoothstep" },
+      { id: "e6", source: "ProcessB", target: "Aggregate", animated: true, type: "smoothstep" },
+      { id: "e7", source: "ProcessC", target: "Aggregate", animated: true, type: "smoothstep" },
+      { id: "e8", source: "Aggregate", target: "Report", animated: true, type: "smoothstep" },
     ]
   }
 };
