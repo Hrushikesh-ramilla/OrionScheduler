@@ -5,18 +5,42 @@ import { TaskNodeData } from "./TaskNode";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Settings2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Settings2, Plus, Trash2 } from "lucide-react";
 
 export function NodeConfigPanel() {
   const { setNodes } = useReactFlow();
   const nodes = useNodes();
   const selectedNode = nodes.find((n) => n.selected);
 
+  const handleAddNode = () => {
+    const newNodeId = `T${nodes.length + 1}`;
+    const newNode = {
+      id: newNodeId,
+      type: "task",
+      position: { x: Math.random() * 200 + 100, y: Math.random() * 200 + 100 },
+      data: { label: newNodeId, payload: "work", status: "pending", priority: 1, duration: 1000 },
+    };
+    setNodes((nds) => [...nds, newNode]);
+  };
+
+  const handleDeleteNode = () => {
+    if (selectedNode) {
+      setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id));
+    }
+  };
+
   if (!selectedNode) {
     return (
-      <div className="w-80 border-l bg-card p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[600px]">
-        <Settings2 className="w-12 h-12 mb-4 opacity-50" />
-        <p>Select a node on the canvas to configure its properties.</p>
+      <div className="w-80 border-l bg-card p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[600px] gap-6">
+        <div>
+          <Settings2 className="w-12 h-12 mb-4 mx-auto opacity-50" />
+          <p>Select a node on the canvas to configure its properties.</p>
+        </div>
+        <Button onClick={handleAddNode} variant="outline" className="w-full gap-2">
+          <Plus className="w-4 h-4" />
+          Add New Node
+        </Button>
       </div>
     );
   }
@@ -80,6 +104,17 @@ export function NodeConfigPanel() {
             onChange={(e) => updateNodeData("priority", parseInt(e.target.value) || 1)} 
           />
         </div>
+      </div>
+
+      <div className="mt-auto pt-6 border-t space-y-4">
+        <Button onClick={handleAddNode} variant="outline" className="w-full gap-2">
+          <Plus className="w-4 h-4" />
+          Add Node
+        </Button>
+        <Button onClick={handleDeleteNode} variant="destructive" className="w-full gap-2">
+          <Trash2 className="w-4 h-4" />
+          Delete Node
+        </Button>
       </div>
     </div>
   );
