@@ -98,6 +98,10 @@ export function DagBuilder() {
   const handleSubmit = async () => {
     try {
       setIsSubmitting(true);
+      // Reset all node statuses to pending before submission
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, data: { ...n.data, status: "pending" } }))
+      );
       const tasks = flowToTasks(nodes, edges);
       await submitDag(tasks);
       toast.success("DAG submitted successfully");
