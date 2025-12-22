@@ -21,7 +21,11 @@ export default function PlaygroundPage() {
       setIsProcessing(true);
       await simulateCrash();
       setIsCrashed(true);
-      toast.success("Crash signal sent!");
+      toast.success("Crash signal sent! System offline.");
+      
+      // Dramatic pause block (Commit 52)
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
     } catch (err: any) {
       toast.error(err.message || "Failed to simulate crash");
     } finally {
