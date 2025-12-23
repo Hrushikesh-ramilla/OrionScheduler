@@ -54,31 +54,35 @@ export default function PlaygroundPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 flex flex-col gap-4 h-[calc(100vh-4rem)] relative">
-      <div className="flex items-center justify-between">
+    <div className="container mx-auto px-4 py-4 md:py-8 flex flex-col gap-3 md:gap-4" style={{ height: 'calc(100vh - 4rem)' }}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2">Playground</h1>
-          <p className="text-muted-foreground">Build a DAG, submit it, and watch the executor handle crashes in real-time.</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-1">Playground</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Submit a DAG and watch the executor crash and recover in real-time.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
           <Button 
             variant="destructive" 
             onClick={handleCrash} 
             disabled={isProcessing || isCrashed || !hasActiveDAG || recoverCooldown}
-            className="gap-2 font-mono uppercase tracking-widest font-bold"
+            className="gap-2 font-mono uppercase tracking-widest font-bold text-xs sm:text-sm"
+            size="sm"
             title={!hasActiveDAG ? "Submit a DAG first" : recoverCooldown ? "Cooldown..." : undefined}
           >
             <AlertOctagon className="w-4 h-4" />
-            Pull the Plug
+            <span className="hidden sm:inline">Pull the Plug</span>
+            <span className="sm:hidden">Crash</span>
           </Button>
           <Button 
             variant="outline" 
             onClick={handleRecover} 
             disabled={isProcessing || !isCrashed}
-            className="gap-2 font-mono uppercase tracking-widest border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10"
+            className="gap-2 font-mono uppercase tracking-widest border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10 text-xs sm:text-sm"
+            size="sm"
           >
             <RotateCcw className="w-4 h-4" />
-            Recover WAL
+            <span className="hidden sm:inline">Recover WAL</span>
+            <span className="sm:hidden">Recover</span>
           </Button>
         </div>
       </div>
