@@ -7,6 +7,7 @@ import { ThroughputChart } from "@/components/Metrics/ThroughputChart";
 import { LatencyChart } from "@/components/Metrics/LatencyChart";
 import { useMetricsState, TimeSeriesPoint } from "@/hooks/useMetricsState";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { fetchLiveMetrics } from "@/lib/api";
 
 export default function MetricsPage() {
   const { summary, setSummary, timeSeries, addDataPoint } = useMetricsState();
@@ -16,7 +17,6 @@ export default function MetricsPage() {
       if (data.type === "metrics.update" && data.payload) {
         const payload = data.payload;
         
-        // Ensure a valid default value is passed for timestamps or formatted correctly
         const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
         setSummary({
@@ -35,6 +35,28 @@ export default function MetricsPage() {
       }
     }
   });
+
+  useEffect(() => {
+    fetchLiveMetrics().then((data) => {
+      if (data) {
+        setSummary({
+          runningNodes: 1,
+          activeTasks: data.queue_size || 0,
+          completedTasks: data.total_completed || 0,
+          failedTasks: data.total_failed || 0,
+          uptimeSeconds: Math.floor((data.uptime_ms || 0) / 1000),
+        });
+        
+        // Push an initial data point
+        const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        addDataPoint({
+          timestamp,
+          tasksPerSec: data.tasks_per_sec || 0,
+          avgLatencyMs: data.avg_latency_ms || 0
+        });
+      }
+    }).catch(console.error);
+  }, [setSummary, addDataPoint]);
 
   return (
     <div className="container mx-auto px-4 py-8">
