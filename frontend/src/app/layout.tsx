@@ -4,6 +4,7 @@ import "./globals.css";
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { Navigation } from "@/components/Navigation";
+import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -22,6 +23,7 @@ export default function RootLayout({
       <body className="antialiased min-h-screen bg-background text-foreground pt-16">
         <Navigation />
         {children}
+        <Toaster />
       </body>
     </html>
   );
