@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ArrowRight, RotateCcw, Activity, Network, Database } from "lucide-react";
+import { ArrowRight, Activity, Network, Database } from "lucide-react";
 import { motion } from "framer-motion";
 import { LiveStats } from "@/components/Landing/LiveStats";
 import { cn } from "@/lib/utils";
