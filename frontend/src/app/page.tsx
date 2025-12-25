@@ -80,6 +80,32 @@ export default function Home() {
       {/* Live Cluster Stats */}
       <LiveStats />
 
+      {/* Crash Resilience Showcase */}
+      <section className="py-24 px-4 bg-muted/30 border-y">
+        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center gap-12 text-center md:text-left">
+          <div className="flex-1 space-y-4">
+            <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-destructive/10 text-destructive border-destructive/20 mb-2">
+              Fault Tolerance
+            </div>
+            <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Zero State Loss. Guaranteed.</h2>
+            <p className="text-lg text-muted-foreground">
+              OrionScheduler employs an append-only Write-Ahead Log (WAL) that captures all state transitions before they are applied. Hardware failure? Process kill? Node eviction? The system replays the WAL on startup and resumes exactly where it left off.
+            </p>
+          </div>
+          <div className="flex-1 w-full bg-[#0D0D0D] rounded-xl border p-6 font-mono text-xs sm:text-sm text-left shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-destructive via-orange-500 to-emerald-500"></div>
+            <div className="space-y-2">
+              <p className="text-muted-foreground">$ kill -9 &lt;scheduler_pid&gt;</p>
+              <p className="text-destructive font-bold">[FATAL] Process terminated.</p>
+              <p className="text-muted-foreground mt-4">$ ./orionscheduler</p>
+              <p className="text-emerald-500">[INFO] Recovering WAL from disk...</p>
+              <p className="text-emerald-500">[INFO] Replayed 42 events.</p>
+              <p className="text-blue-500">[INFO] Resuming DAG execution.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Section */}
       <section className="py-24 px-4 text-center max-w-3xl mx-auto space-y-8">
         <h2 className="text-3xl md:text-5xl font-bold tracking-tight">Ready to break things?</h2>
