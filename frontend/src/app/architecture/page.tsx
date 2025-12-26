@@ -87,6 +87,18 @@ export default function ArchitecturePage() {
             <p>
               Cycle detection happens strictly at ingestion time. If the DAG contains a cycle, the topological sort will fail to consume all nodes, and the API will reject the payload with a <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">400 Bad Request</code> before any execution begins.
             </p>
+            <div className="bg-[#0D0D0D] p-4 rounded-xl border font-mono text-xs overflow-x-auto text-emerald-400">
+<pre>{`// simplified kahn's sort
+func (s *Scheduler) validateAndSort(tasks []Task) error {
+    inDegree := make(map[string]int)
+    for _, t := range tasks {
+        for _, dep := range t.Dependencies {
+            inDegree[t.ID]++
+        }
+    }
+    // ...
+}`}</pre>
+            </div>
           </div>
         </section>
 
@@ -112,6 +124,14 @@ export default function ArchitecturePage() {
               <li>If a task was logged as <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> or <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">RUNNING</code> but lacks a terminal event, it is defined as an <strong>Orphan Target</strong>.</li>
               <li>Orphan targets are forcefully transitioned back to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> and pushed back into the 'Ready' queue.</li>
             </ul>
+            <div className="bg-[#0D0D0D] p-4 rounded-xl border font-mono text-xs overflow-x-auto text-orange-400">
+<pre>{`// wal write procedure
+func (w *WAL) Append(entry LogEntry) error {
+    data, _ := json.Marshal(entry)
+    w.file.Write(append(data, '\\n'))
+    return w.file.Sync() // fsync block
+}`}</pre>
+            </div>
           </div>
         </section>
 
