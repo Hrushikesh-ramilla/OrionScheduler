@@ -115,6 +115,19 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
+        {/* WebSocket Telemetry */}
+        <section className="space-y-6">
+          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Real-time Telemetry (WebSocket)</h2>
+          <div className="space-y-4 text-muted-foreground">
+            <p>
+              Observability is a core feature, built on top of Gorilla WebSockets. Tracking distributed application states is usually delegated to separated monitoring stacks (e.g. Prometheus + Grafana). OrionScheduler ships with built-in instrumentation.
+            </p>
+            <p>
+              When clients connect via <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">/ws</code>, they subscribe to a global event channel. System state is transmitted at 60Hz. If a client drops, fails, or lags, non-blocking channels ensure the scheduler core is never paused. Missing a generic UI broadcast is acceptable; dropping a task execution is not.
+            </p>
+          </div>
+        </section>
+
       </div>
     </div>
   );
