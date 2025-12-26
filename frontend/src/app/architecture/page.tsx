@@ -17,8 +17,37 @@ export default function ArchitecturePage() {
         {/* Placeholder for Commit 77: System Diagram */}
         <section className="space-y-6">
           <h2 className="text-2xl font-bold tracking-tight border-b pb-2">System Overview</h2>
-          <div className="bg-card w-full h-64 border rounded-xl flex items-center justify-center text-muted-foreground text-sm uppercase tracking-widest">
-            [ System Diagram Placeholder ]
+          <div className="bg-card w-full border rounded-xl p-8 shadow-sm overflow-x-auto">
+            <div className="min-w-[600px] flex flex-col items-center gap-8 font-mono text-sm">
+              <div className="flex gap-16 w-full justify-center">
+                <div className="border border-primary bg-primary/5 px-6 py-3 rounded text-primary font-bold shadow-sm">
+                  User / API Client
+                </div>
+              </div>
+              <div className="w-px h-8 bg-border"></div>
+              <div className="flex gap-6 w-full justify-center items-stretch">
+                <div className="border border-muted-foreground/30 bg-muted/20 px-6 py-4 rounded text-center shadow-sm w-48 flex flex-col justify-center">
+                  <div className="font-bold mb-2">HTTP / WS Handler</div>
+                  <div className="text-xs text-muted-foreground whitespace-normal">Ingest DAGs, stream metrics</div>
+                </div>
+                <div className="w-8 h-px bg-border self-center"></div>
+                <div className="border-2 border-emerald-500/50 bg-emerald-500/5 px-6 py-4 rounded text-center shadow-sm w-64">
+                  <div className="font-bold text-emerald-600 dark:text-emerald-400 mb-2">Core Scheduler</div>
+                  <div className="text-xs text-muted-foreground mb-2">Kahn's Algorithm + Gorilla Mux</div>
+                  <div className="grid grid-cols-2 gap-2 mt-4 text-[10px]">
+                    <div className="border border-border rounded bg-background p-1">Event Loop</div>
+                    <div className="border border-border rounded bg-background p-1">Task Queue</div>
+                  </div>
+                </div>
+                <div className="w-8 h-px bg-border self-center"></div>
+                <div className="border border-orange-500/50 bg-orange-500/5 px-6 py-4 rounded text-center shadow-sm w-48 space-y-2 flex flex-col justify-center">
+                  <div className="font-bold text-orange-600 dark:text-orange-400">Disk WAL</div>
+                  <div className="text-[10px] text-muted-foreground bg-background rounded border p-1 break-all">
+                    wal/orion.log
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
