@@ -51,10 +51,24 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
-        {/* Placeholder for Commit 78: Constraints */}
         <section className="space-y-6">
           <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Engineering Constraints</h2>
-          <div className="text-muted-foreground italic">[ Constraints Placeholder ]</div>
+          <div className="space-y-4">
+            <ul className="list-disc pl-6 space-y-4 text-muted-foreground">
+              <li>
+                <strong className="text-foreground">Strict Consistency over Availability:</strong> In the event of a disk failure writing to the WAL, the scheduler immediately halts (panics). It is safer to drop availability than to lose track of DAG execution state.
+              </li>
+              <li>
+                <strong className="text-foreground">Single-Node Bound:</strong> OrionScheduler is designed to orchestrate processes on a single physical or virtual machine. There is no distributed consensus (Paxos/Raft). This massively reduces complexity and network partition issues.
+              </li>
+              <li>
+                <strong className="text-foreground">Idempotent Recoveries:</strong> The WAL replay mechanism must be able to encounter partially completed graph nodes and safely requeue them without side effects, leaning on the assumption that underlying task commands are themselves idempotent.
+              </li>
+              <li>
+                <strong className="text-foreground">In-Memory Event Bus:</strong> The WebSocket telemetry is driven by a Go channel event bus. To prevent slow WebSocket clients from blocking the core scheduler loop, the event channel must be buffered and non-blocking drops are implemented under backpressure.
+              </li>
+            </ul>
+          </div>
         </section>
 
         {/* Placeholder for Commit 79: DAG Logic */}
