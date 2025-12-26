@@ -146,6 +146,24 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
+        {/* Performance Trade-offs */}
+        <section className="space-y-6">
+          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Single Node Trade-offs</h2>
+          <div className="space-y-4 text-muted-foreground">
+            <p>
+              By restricting OrionScheduler to a single machine, we bypass distributed system orchestration taxes (e.g. Paxos consensus, network partition recovery, split-brain). This decision yields extreme performance for the scheduler core.
+            </p>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>
+                <strong className="text-foreground">Pros:</strong> Zero inter-node latency, trivial recovery semantics, low cognitive overhead for operations.
+              </li>
+              <li>
+                <strong className="text-foreground">Cons:</strong> Vulnerable to literal unrecoverable hardware destruction (e.g. disk burns up), limited by the maximum compute power of a single EC2/bare-metal instance.
+              </li>
+            </ul>
+          </div>
+        </section>
+
       </div>
     </div>
   );
