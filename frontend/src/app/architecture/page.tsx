@@ -71,10 +71,23 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
-        {/* Placeholder for Commit 79: DAG Logic */}
         <section className="space-y-6">
           <h2 className="text-2xl font-bold tracking-tight border-b pb-2">DAG Execution (Kahn's Algorithm)</h2>
-          <div className="text-muted-foreground italic">[ DAG Placeholder ]</div>
+          <div className="space-y-4 text-muted-foreground">
+            <p>
+              The topological sorting of tasks is driven by a modified version of Kahn's Algorithm. When a DAG is submitted:
+            </p>
+            <ol className="list-decimal pl-6 space-y-2">
+              <li>An adjacency matrix and in-degree count map are computed for all nodes.</li>
+              <li>Nodes with an in-degree of <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code> (no dependencies) are immediately pushed into the 'Ready' queue.</li>
+              <li>Worker goroutines pull from the 'Ready' queue and execute tasks concurrently.</li>
+              <li>Upon success, the scheduler decrements the in-degree of all dependent nodes.</li>
+              <li>If a dependent node's in-degree drops to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code>, it is pushed to the 'Ready' queue.</li>
+            </ol>
+            <p>
+              Cycle detection happens strictly at ingestion time. If the DAG contains a cycle, the topological sort will fail to consume all nodes, and the API will reject the payload with a <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">400 Bad Request</code> before any execution begins.
+            </p>
+          </div>
         </section>
 
         {/* Placeholder for Commit 80: WAL */}
