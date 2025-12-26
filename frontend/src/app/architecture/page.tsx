@@ -90,10 +90,29 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
-        {/* Placeholder for Commit 80: WAL */}
         <section className="space-y-6">
           <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Crash Recovery via WAL</h2>
-          <div className="text-muted-foreground italic">[ WAL Placeholder ]</div>
+          <div className="space-y-4 text-muted-foreground">
+            <p>
+              The most critical guarantee of OrionScheduler is crash consistency. This is achieved through a Write-Ahead Log (WAL).
+            </p>
+            <p>
+              Before any state change is broadcasted or considered "committed", it is serialized and appended to a persistent disk log (<code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">orion.log</code>). We enforce an <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">fsync</code> before emitting the in-memory event to guarantee durability.
+            </p>
+            <p>
+              The state transitions are:
+              <br />
+              <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground mt-2 inline-block">PENDING -&gt; RUNNING -&gt; [COMPLETED | FAILED]</code>
+            </p>
+            <p>
+              On boot, the scheduler checks for the existence of the WAL index. If found, it reads the journal sequentially:
+            </p>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>If a task reaches <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">COMPLETED</code> or <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">FAILED</code>, it is ignored (already terminal).</li>
+              <li>If a task was logged as <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> or <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">RUNNING</code> but lacks a terminal event, it is defined as an <strong>Orphan Target</strong>.</li>
+              <li>Orphan targets are forcefully transitioned back to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> and pushed back into the 'Ready' queue.</li>
+            </ul>
+          </div>
         </section>
 
       </div>
