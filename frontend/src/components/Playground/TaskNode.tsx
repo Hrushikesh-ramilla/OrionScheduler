@@ -22,7 +22,7 @@ const statusConfig: Record<TaskStatus, { color: string; border: string; bg: stri
   },
   running: {
     color: "text-blue-500",
-    border: "border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.3)]",
+    border: "border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-pulse",
     bg: "bg-blue-500/10",
     icon: <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
   },
