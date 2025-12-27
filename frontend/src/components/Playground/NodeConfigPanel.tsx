@@ -32,7 +32,7 @@ export function NodeConfigPanel() {
 
   if (!selectedNode) {
     return (
-      <div className="w-80 border-l bg-card p-6 flex flex-col items-center justify-center text-center text-muted-foreground min-h-[600px] gap-6">
+      <div className="w-full h-full bg-card p-6 flex flex-col items-center justify-center text-center text-muted-foreground gap-6 overflow-y-auto">
         <div>
           <Settings2 className="w-12 h-12 mb-4 mx-auto opacity-50" />
           <p>Select a node on the canvas to configure its properties.</p>
@@ -59,7 +59,7 @@ export function NodeConfigPanel() {
   };
 
   return (
-    <div className="w-80 border-l bg-card p-6 min-h-[600px] flex flex-col gap-6">
+    <div className="w-full h-full bg-card p-6 flex flex-col gap-6 overflow-y-auto">
       <div>
         <h3 className="font-semibold text-lg flex items-center gap-2">
           <Settings2 className="w-5 h-5" />
