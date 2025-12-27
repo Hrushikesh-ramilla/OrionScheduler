@@ -8,7 +8,9 @@ export interface UseWebSocketOptions {
   reconnectInterval?: number;
 }
 
-export function useWebSocket({ url = 'ws://localhost:8080/ws', onMessage, reconnectInterval = 3000 }: UseWebSocketOptions = {}) {
+const defaultWS = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8080/ws';
+
+export function useWebSocket({ url = defaultWS, onMessage, reconnectInterval = 3000 }: UseWebSocketOptions = {}) {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
