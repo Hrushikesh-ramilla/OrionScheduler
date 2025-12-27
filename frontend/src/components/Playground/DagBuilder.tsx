@@ -25,6 +25,7 @@ import { TaskEvent } from "@/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Play } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const nodeTypes: NodeTypes = {
   task: TaskNode,
@@ -109,6 +110,10 @@ export function DagBuilder() {
 
   return (
     <div className="w-full h-full min-h-[600px] border-r bg-background overflow-hidden relative">
+      <div className="absolute top-4 right-4 z-10 flex items-center gap-2 text-xs font-mono bg-background/80 backdrop-blur-md px-3 py-1.5 rounded-full border shadow-sm">
+        <div className={cn("w-2 h-2 rounded-full", wsStatus === 'connected' ? "bg-emerald-500 animate-pulse" : "bg-destructive")} />
+        {wsStatus === 'connected' ? 'Live Execution' : 'Disconnected'}
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
