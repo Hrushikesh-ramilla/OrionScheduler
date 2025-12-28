@@ -1,4 +1,4 @@
-import { Activity, Network, Database, Zap } from "lucide-react";
+// Architecture Page
 
 export default function ArchitecturePage() {
   return (
@@ -72,17 +72,17 @@ export default function ArchitecturePage() {
         </section>
 
         <section className="space-y-4 md:space-y-6">
-          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">DAG Execution (Kahn's Algorithm)</h2>
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">DAG Execution (Kahn&apos;s Algorithm)</h2>
           <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
-              The topological sorting of tasks is driven by a modified version of Kahn's Algorithm. When a DAG is submitted:
+              The topological sorting of tasks is driven by a modified version of Kahn&apos;s Algorithm. When a DAG is submitted:
             </p>
             <ol className="list-decimal pl-5 md:pl-6 space-y-2">
               <li>An adjacency matrix and in-degree count map are computed for all nodes.</li>
-              <li>Nodes with an in-degree of <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code> (no dependencies) are immediately pushed into the 'Ready' queue.</li>
-              <li>Worker goroutines pull from the 'Ready' queue and execute tasks concurrently.</li>
+              <li>Nodes with an in-degree of <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code> (no dependencies) are immediately pushed into the &apos;Ready&apos; queue.</li>
+              <li>Worker goroutines pull from the &apos;Ready&apos; queue and execute tasks concurrently.</li>
               <li>Upon success, the scheduler decrements the in-degree of all dependent nodes.</li>
-              <li>If a dependent node's in-degree drops to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code>, it is pushed to the 'Ready' queue.</li>
+              <li>If a dependent node&apos;s in-degree drops to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code>, it is pushed to the &apos;Ready&apos; queue.</li>
             </ol>
             <p>
               Cycle detection happens strictly at ingestion time. If the DAG contains a cycle, the topological sort will fail to consume all nodes, and the API will reject the payload with a <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">400 Bad Request</code> before any execution begins.
@@ -122,7 +122,7 @@ func (s *Scheduler) validateAndSort(tasks []Task) error {
             <ul className="list-disc pl-6 space-y-2">
               <li>If a task reaches <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">COMPLETED</code> or <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">FAILED</code>, it is ignored (already terminal).</li>
               <li>If a task was logged as <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> or <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">RUNNING</code> but lacks a terminal event, it is defined as an <strong>Orphan Target</strong>.</li>
-              <li>Orphan targets are forcefully transitioned back to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> and pushed back into the 'Ready' queue.</li>
+              <li>Orphan targets are forcefully transitioned back to <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">PENDING</code> and pushed back into the &apos;Ready&apos; queue.</li>
             </ul>
             <div className="bg-[#0D0D0D] p-4 rounded-xl border font-mono text-xs overflow-x-auto text-orange-400">
 <pre>{`// wal write procedure

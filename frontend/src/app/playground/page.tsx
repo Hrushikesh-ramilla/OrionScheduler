@@ -113,10 +113,10 @@ export default function PlaygroundPage() {
         </AnimatePresence>
         <div className="w-full h-full bg-card border rounded-lg overflow-hidden shadow-sm min-h-0">
           <ReactFlowProvider>
-            {/* @ts-ignore - shadcn resizable panel group types mismatch in v4 */}
+            {/* @ts-expect-error - shadcn resizable panel group types mismatch in v4 */}
             <ResizablePanelGroup direction="vertical">
               <ResizablePanel defaultSize={70}>
-                {/* @ts-ignore */}
+                {/* @ts-expect-error */}
                 <ResizablePanelGroup direction="horizontal">
                   <ResizablePanel defaultSize={75} minSize={50}>
                     <DagBuilder onSubmitSuccess={() => setHasActiveDAG(true)} />
