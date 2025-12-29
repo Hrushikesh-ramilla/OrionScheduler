@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 export default function PlaygroundPage() {
   const [isCrashed, setIsCrashed] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [hasActiveDAG, setHasActiveDAG] = useState(false);
 
   const handleCrash = async () => {
     try {
@@ -57,8 +58,9 @@ export default function PlaygroundPage() {
           <Button 
             variant="destructive" 
             onClick={handleCrash} 
-            disabled={isProcessing || isCrashed}
+            disabled={isProcessing || isCrashed || !hasActiveDAG}
             className="gap-2 font-mono uppercase tracking-widest font-bold"
+            title={!hasActiveDAG ? "Submit a DAG first" : undefined}
           >
             <AlertOctagon className="w-4 h-4" />
             Pull the Plug
@@ -107,7 +109,7 @@ export default function PlaygroundPage() {
                 {/* @ts-ignore */}
                 <ResizablePanelGroup direction="horizontal">
                   <ResizablePanel defaultSize={75} minSize={50}>
-                    <DagBuilder />
+                    <DagBuilder onSubmitSuccess={() => setHasActiveDAG(true)} />
                   </ResizablePanel>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={25} minSize={20}>
