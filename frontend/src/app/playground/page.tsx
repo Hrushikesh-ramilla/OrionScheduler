@@ -16,6 +16,7 @@ export default function PlaygroundPage() {
   const [isCrashed, setIsCrashed] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasActiveDAG, setHasActiveDAG] = useState(false);
+  const [recoverCooldown, setRecoverCooldown] = useState(false);
 
   const handleCrash = async () => {
     try {
@@ -39,7 +40,12 @@ export default function PlaygroundPage() {
       setIsProcessing(true);
       await recoverSystem();
       setIsCrashed(false);
-      toast.success("Recovery signal sent!");
+      toast.success("Recovery signal sent! WAL replaying...");
+      
+      // Prevent rapid cycle: 2s cooldown before crash can be triggered again
+      setRecoverCooldown(true);
+      setTimeout(() => setRecoverCooldown(false), 2000);
+      
     } catch (err: any) {
       toast.error(err.message || "Failed to recover system");
     } finally {
@@ -58,9 +64,9 @@ export default function PlaygroundPage() {
           <Button 
             variant="destructive" 
             onClick={handleCrash} 
-            disabled={isProcessing || isCrashed || !hasActiveDAG}
+            disabled={isProcessing || isCrashed || !hasActiveDAG || recoverCooldown}
             className="gap-2 font-mono uppercase tracking-widest font-bold"
-            title={!hasActiveDAG ? "Submit a DAG first" : undefined}
+            title={!hasActiveDAG ? "Submit a DAG first" : recoverCooldown ? "Cooldown..." : undefined}
           >
             <AlertOctagon className="w-4 h-4" />
             Pull the Plug
