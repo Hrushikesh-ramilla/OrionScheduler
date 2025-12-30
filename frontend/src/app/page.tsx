@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, RotateCcw, Activity } from "lucide-react";
+import { ArrowRight, RotateCcw, Activity, Network, Database } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function Home() {
@@ -42,6 +42,35 @@ export default function Home() {
             </Button>
           </div>
         </motion.div>
+      </section>
+
+      {/* Features Grid */}
+      <section className="py-20 px-4">
+        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
+            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-primary">
+              <Network className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold">DAG Execution</h3>
+            <p className="text-muted-foreground">Kahn's algorithm-based valid DAG scheduling. Built to handle complex dependencies natively in Go.</p>
+          </div>
+          
+          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
+            <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500">
+              <Database className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold">Crash Recovery</h3>
+            <p className="text-muted-foreground">Disk-backed Write-Ahead Log (WAL) ensures exactly-once execution. Rip the power cord out. It comes back.</p>
+          </div>
+          
+          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
+            <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500">
+              <Activity className="w-6 h-6" />
+            </div>
+            <h3 className="text-xl font-bold">Live Observability</h3>
+            <p className="text-muted-foreground">Real-time WebSocket telemetry for every single task state transition. Watch the magic happen.</p>
+          </div>
+        </div>
       </section>
     </div>
   );
