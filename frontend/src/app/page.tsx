@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, RotateCcw, Activity, Network, Database } from "lucide-react";
 import { motion } from "framer-motion";
+import { LiveStats } from "@/components/Landing/LiveStats";
 
 export default function Home() {
   return (
@@ -72,6 +73,9 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Live Cluster Stats */}
+      <LiveStats />
     </div>
   );
 }
