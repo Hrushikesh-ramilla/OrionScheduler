@@ -1,15 +1,46 @@
 "use client";
 
 import { Activity } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { fetchLiveMetrics } from "@/lib/api";
 
 export function LiveStats() {
-  // Hardcoded values for UI development (Commit 60)
-  const stats = {
-    runningNodes: 1,
-    activeTasks: 42,
-    completedTasks: 1337,
+  const [stats, setStats] = useState({
+    runningNodes: 1, // Single-node execution engine
+    activeTasks: 0,
+    completedTasks: 0,
     failedTasks: 0,
-  };
+  });
+
+  useWebSocket({
+    onMessage: (payload: any) => {
+      // payload might have top level type or just be the metrics directly if it's the metrics update.
+      // Assuming event structure resembles { type: "metrics.update", payload: { ... } }
+      if (payload.type === "metrics.update" && payload.payload) {
+        setStats({
+          runningNodes: 1,
+          activeTasks: payload.payload.queue_size || 0,
+          completedTasks: payload.payload.total_completed || 0,
+          failedTasks: payload.payload.total_failed || 0,
+        });
+      }
+    }
+  });
+
+  useEffect(() => {
+    // Fetch initial metrics
+    fetchLiveMetrics().then((data) => {
+      if (data) {
+        setStats({
+          runningNodes: 1, // Always 1 for OrionScheduler
+          activeTasks: data.queue_size || 0, // Approx for active/pending
+          completedTasks: data.total_completed || 0,
+          failedTasks: data.total_failed || 0,
+        });
+      }
+    }).catch(console.error);
+  }, []);
 
   return (
     <section className="py-12 border-t border-b bg-muted/10">
