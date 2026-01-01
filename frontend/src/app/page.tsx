@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { ArrowRight, RotateCcw, Activity, Network, Database } from "lucide-react";
 import { motion } from "framer-motion";
 import { LiveStats } from "@/components/Landing/LiveStats";
+import { cn } from "@/lib/utils";
 
 export default function Home() {
   return (
@@ -31,16 +32,18 @@ export default function Home() {
           </p>
           
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
-            <Button asChild size="lg" className="rounded-full px-8 h-14 text-base gap-2">
-              <Link href="/playground">
-                Enter Playground <ArrowRight className="w-5 h-5" />
-              </Link>
-            </Button>
-            <Button asChild variant="outline" size="lg" className="rounded-full px-8 h-14 text-base gap-2 bg-background">
-              <Link href="/metrics">
-                <Activity className="w-5 h-5" /> View Live Metrics
-              </Link>
-            </Button>
+            <Link 
+              href="/playground" 
+              className={cn(buttonVariants({ size: "lg" }), "rounded-full px-8 h-14 text-base gap-2")}
+            >
+              Enter Playground <ArrowRight className="w-5 h-5" />
+            </Link>
+            <Link 
+              href="/metrics" 
+              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full px-8 h-14 text-base gap-2 bg-background")}
+            >
+              <Activity className="w-5 h-5" /> View Live Metrics
+            </Link>
           </div>
         </motion.div>
       </section>
@@ -76,6 +79,20 @@ export default function Home() {
 
       {/* Live Cluster Stats */}
       <LiveStats />
+
+      {/* CTA Section */}
+      <section className="py-24 px-4 text-center max-w-3xl mx-auto space-y-8">
+        <h2 className="text-3xl md:text-5xl font-bold tracking-tight">Ready to break things?</h2>
+        <p className="text-xl text-muted-foreground">
+          Drop into the Playground. Submit multiple dependent tasks. Kill the server mid-execution. Watch Kahn's algorithm re-evaluate and the WAL recover lost state.
+        </p>
+        <Link 
+          href="/playground" 
+          className={cn(buttonVariants({ size: "lg" }), "rounded-full px-8 h-14 text-base gap-2")}
+        >
+          Start the Demo <ArrowRight className="w-5 h-5" />
+        </Link>
+      </section>
     </div>
   );
 }
