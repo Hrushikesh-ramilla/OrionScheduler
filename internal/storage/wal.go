@@ -16,10 +16,14 @@ import (
 
 // WalEntry represents a discrete state change in the system.
 type WalEntry struct {
-	Type           string        `json:"type"`             // "INGEST", "COMPLETE", "FAIL", "REQUEST"
+	Type           string        `json:"type"`             // "INGEST", "COMPLETE", "FAIL", "START", "REQUEST"
 	Tasks          []models.Task `json:"tasks,omitempty"`  // Used for INGEST
-	TaskID         string        `json:"task_id,omitempty"`// Used for COMPLETE/FAIL
+	TaskID         string        `json:"task_id,omitempty"`// Used for COMPLETE/FAIL/START
 	IdempotencyKey string        `json:"idempotency_key,omitempty"` // Used for REQUEST
+	// IsCascade distinguishes a cascade-propagated FAIL from an organic worker FAIL.
+	// Cascade-failed tasks must remain permanently failed on WAL replay; they must
+	// never be re-enqueued or have their retry counter incremented.
+	IsCascade bool `json:"is_cascade,omitempty"`
 }
 
 // WAL provides durable persistence for incoming tasks and state changes.
@@ -54,9 +58,16 @@ func (w *WAL) AppendComplete(taskID string) error {
 	return w.append(WalEntry{Type: "COMPLETE", TaskID: taskID})
 }
 
-// AppendFail logs that a task failed execution.
+// AppendFail logs that a task failed execution organically (from a worker).
 func (w *WAL) AppendFail(taskID string) error {
 	return w.append(WalEntry{Type: "FAIL", TaskID: taskID})
+}
+
+// AppendCascadeFail logs that a task was killed by cascade propagation from
+// an upstream failure. On WAL replay these entries must NOT trigger retry
+// logic and must NOT adjust the running counter (the task was never running).
+func (w *WAL) AppendCascadeFail(taskID string) error {
+	return w.append(WalEntry{Type: "FAIL", TaskID: taskID, IsCascade: true})
 }
 
 // AppendStart logs that a task started executing.
