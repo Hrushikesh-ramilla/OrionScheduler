@@ -63,7 +63,7 @@ func (m *SchedulerManager) Start() *Scheduler {
 			case "COMPLETE":
 				scheduler.ReplayComplete(entry.TaskID)
 			case "FAIL":
-				scheduler.ReplayFail(entry.TaskID)
+				scheduler.ReplayFail(entry.TaskID, entry.IsCascade)
 			}
 		}
 
@@ -134,7 +134,15 @@ func (m *SchedulerManager) SimulateCrash() {
 
 		m.cancel()
 		if m.dispatcher != nil {
+			// Wait for all workers to finish — after this point no goroutine
+			// will ever write to EventChan again, so it is safe to close it.
 			m.dispatcher.Wait()
+		}
+		if m.scheduler != nil {
+			// Closing EventChan causes the hub.Run goroutine (which is ranging
+			// over this channel) to exit cleanly. Without this close, that
+			// goroutine leaks permanently on every crash/recover cycle.
+			close(m.scheduler.EventChan)
 		}
 		m.scheduler = nil
 		m.dispatcher = nil
