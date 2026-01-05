@@ -65,6 +65,9 @@ func NewHandler(manager *engine.SchedulerManager, wal *storage.WAL, idemStore *I
 	// GET /api/v1/dags — List all submitted DAGs.
 	mux.HandleFunc("/api/v1/dags", h.handleListDAGs)
 
+	// GET /api/v1/dag/state — Current DAG topology + per-task status for graph reconstruction.
+	mux.HandleFunc("/api/v1/dag/state", h.handleDAGState)
+
 	// GET /healthz — Liveness probe (always 200).
 	mux.HandleFunc("/healthz", h.handleHealthz)
 
@@ -205,8 +208,8 @@ func (h *Handler) handleSubmitDAG(w http.ResponseWriter, r *http.Request) {
 
 	const MaxDepsPerTask = 50
 
-	for _, t := range tasks {
-		if len(t.Dependencies) > MaxDepsPerTask {
+	for i := range tasks {
+		if len(tasks[i].Dependencies) > MaxDepsPerTask {
 			http.Error(w, `{"error":"too many dependencies"}`, http.StatusBadRequest)
 			return
 		}
@@ -371,10 +374,44 @@ func (h *Handler) handleMetricsLive(w http.ResponseWriter, r *http.Request) {
 		"ws_clients":     wsClients,
 		"uptime_seconds": int(time.Since(serverStartTime).Seconds()),
 		"workers":        4, // matches DefaultWorkerCount
+		"dropped_events": sched.DroppedEvents(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// -----------------------------------------------------------------
+// GET /api/v1/dag/state
+// -----------------------------------------------------------------
+// Returns the current task topology and per-task status for all active
+// executions. Used by the frontend on mount and after system.recover to
+// reconstruct the React Flow graph without losing in-flight state.
+//
+// Response example:
+//
+//	{"tasks": {"T1": {"id":"T1","status":"completed",...}, ...}}
+func (h *Handler) handleDAGState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	sched := h.manager.Scheduler()
+	if sched == nil {
+		// Scheduler is offline (crashed). Return empty state — frontend can
+		// detect this and show the correct offline UI.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"tasks": map[string]interface{}{}})
+		return
+	}
+
+	snap := sched.GetTaskSnapshot()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"tasks": snap,
+	})
 }
 
 // -----------------------------------------------------------------
@@ -410,19 +447,19 @@ func validateDAG(tasks []models.Task) error {
 	inDegree := make(map[string]int, len(tasks))
 	dependents := make(map[string][]string)
 
-	for _, t := range tasks {
-		nodes[t.ID] = true
-		inDegree[t.ID] = 0
+	for i := range tasks {
+		nodes[tasks[i].ID] = true
+		inDegree[tasks[i].ID] = 0
 	}
 
 	// Check dependencies exist and build in-degree counts.
-	for _, t := range tasks {
-		for _, dep := range t.Dependencies {
+	for i := range tasks {
+		for _, dep := range tasks[i].Dependencies {
 			if !nodes[dep] {
-				return fmt.Errorf("task %q depends on unknown task %q", t.ID, dep)
+				return fmt.Errorf("task %q depends on unknown task %q", tasks[i].ID, dep)
 			}
-			inDegree[t.ID]++
-			dependents[dep] = append(dependents[dep], t.ID)
+			inDegree[tasks[i].ID]++
+			dependents[dep] = append(dependents[dep], tasks[i].ID)
 		}
 	}
 

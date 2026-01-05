@@ -42,3 +42,12 @@ export async function recoverSystem() {
   if (!res.ok) throw new Error('Failed to recover system');
   return res.json();
 }
+
+// fetchDagState returns current task topology and per-task status.
+// Used by DagBuilder on mount and on system.recover to reconstruct the graph.
+export async function fetchDagState(): Promise<{ tasks: Record<string, any> }> {
+  const res = await fetch(`${API_BASE}/api/v1/dag/state`);
+  if (!res.ok) throw new Error('Failed to fetch DAG state');
+  return res.json();
+}
+
