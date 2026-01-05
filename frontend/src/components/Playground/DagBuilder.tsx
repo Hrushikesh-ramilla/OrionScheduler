@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -14,12 +14,12 @@ import ReactFlow, {
   Panel,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { TaskNode } from "./TaskNode";
 import { DAG_TEMPLATES } from "@/lib/templates";
 import { flowToTasks } from "@/lib/dagConvert";
-import { submitDag } from "@/lib/api";
+import { submitDag, fetchDagState } from "@/lib/api";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { TaskEvent } from "@/types";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -59,33 +59,106 @@ export function DagBuilder({ onSubmitSuccess }: DagBuilderProps = {}) {
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Track which node IDs were cascade-killed so reconstruct after recover
+  // can restore cascade-failed status rather than generic 'failed'.
+  const cascadeKilledIds = useRef<Set<string>>(new Set());
+
   const onConnect = useCallback(
     (params: Edge | Connection) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
 
+  // Reconstruct graph from backend state (used on mount and after system.recover).
+  const reconstructFromState = useCallback(async () => {
+    try {
+      const state = await fetchDagState();
+      const tasks = state?.tasks;
+      if (!tasks || Object.keys(tasks).length === 0) return;
+
+      const backendStatusToUI: Record<string, string> = {
+        pending:   "pending",
+        ready:     "pending",
+        running:   "running",
+        completed: "completed",
+        failed:    "failed",
+      };
+
+      setNodes((nds) =>
+        nds.map((n) => {
+          const task = tasks[n.id];
+          if (!task) return n;
+          // If this node was previously cascade-killed, keep that status.
+          const uiStatus = cascadeKilledIds.current.has(n.id)
+            ? "cascade-failed"
+            : (backendStatusToUI[task.status] ?? "pending");
+          return { ...n, data: { ...n.data, status: uiStatus } };
+        })
+      );
+    } catch (err) {
+      // Non-fatal: graph stays as-is if endpoint fails.
+      console.warn("Failed to reconstruct DAG state:", err);
+    }
+  }, [setNodes]);
+
+  // On mount, reconstruct any in-flight execution the user may have missed
+  // (e.g., they submitted a DAG in another tab or the page was refreshed).
+  useEffect(() => {
+    reconstructFromState();
+  }, [reconstructFromState]);
+
   const { status: wsStatus } = useWebSocket({
     onMessage: (event: TaskEvent) => {
-      // Map backend events to our UI node state
+      // --- Task lifecycle events ---
       if (['task.started', 'task.completed', 'task.failed', 'task.retry'].includes(event.type)) {
-        setNodes((nds) => 
+        setNodes((nds) =>
           nds.map((n) => {
             if (n.id === event.task_id) {
-              const statusMap: any = {
-                'task.started': 'running',
+              const statusMap: Record<string, string> = {
+                'task.started':   'running',
                 'task.completed': 'completed',
-                'task.failed': 'failed',
-                'task.retry': 'retrying'
+                'task.failed':    'failed',
+                'task.retry':     'retrying',
               };
               return { ...n, data: { ...n.data, status: statusMap[event.type] } };
             }
             return n;
           })
         );
-      } else if (event.type === "system.crash") {
-        toast.error("System crashed!");
+      }
+
+      // --- Cascade failure: propagate visually outward from root with stagger ---
+      // event.dag_tasks: all cascade-affected node IDs (includes root)
+      // event.task_id:   the root failure that triggered propagation
+      else if (event.type === 'task.cascade' && Array.isArray(event.dag_tasks)) {
+        const affected = event.dag_tasks;
+
+        // Record cascade-killed IDs for reconstruct-after-recover.
+        affected.forEach((id) => cascadeKilledIds.current.add(id));
+
+        // Stagger: each node gets cascade-failed 80ms after the previous one,
+        // creating a visual wave that propagates from the root outward.
+        affected.forEach((taskId, idx) => {
+          setTimeout(() => {
+            setNodes((nds) =>
+              nds.map((n) =>
+                n.id === taskId
+                  ? { ...n, data: { ...n.data, status: 'cascade-failed' } }
+                  : n
+              )
+            );
+          }, idx * 80);
+        });
+      }
+
+      // --- System events ---
+      else if (event.type === "system.crash") {
+        toast.error("System crashed! Waiting for recovery...");
       } else if (event.type === "system.recover") {
-        toast.success("System recovered, resuming DAG...");
+        // Re-fetch backend state and rebuild graph instead of only toasting.
+        // This restores correct per-task status after WAL replay completes.
+        reconstructFromState().then(() => {
+          toast.success("System recovered — DAG state restored.");
+        });
       }
     }
   });
@@ -102,7 +175,9 @@ export function DagBuilder({ onSubmitSuccess }: DagBuilderProps = {}) {
   const handleSubmit = async () => {
     try {
       setIsSubmitting(true);
-      // Reset all node statuses to pending before submission
+      // Clear cascade tracking on new submission.
+      cascadeKilledIds.current.clear();
+      // Reset all node statuses to pending before submission.
       setNodes((nds) =>
         nds.map((n) => ({ ...n, data: { ...n.data, status: "pending" } }))
       );
