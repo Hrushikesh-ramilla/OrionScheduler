@@ -74,6 +74,7 @@ export default function MetricsPage() {
     }).catch(console.error);
 
     // MINOR 1: Fetch DAG history list and display in the table below charts.
+    // This connects the backend endpoint to the UI.
     fetchDags().then((data) => {
       if (data?.dags) {
         setDags(data.dags);
