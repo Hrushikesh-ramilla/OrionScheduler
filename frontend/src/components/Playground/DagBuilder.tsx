@@ -167,8 +167,23 @@ export function DagBuilder({ onSubmitSuccess }: DagBuilderProps = {}) {
     if (!templateId) return;
     const template = DAG_TEMPLATES[templateId];
     if (template) {
-      setNodes(template.nodes as any);
-      setEdges(template.edges as any);
+      const suffix = Math.random().toString(36).substring(7);
+      
+      const newNodes = template.nodes.map((n: any) => ({
+        ...n,
+        id: `${n.id}-${suffix}`,
+        data: { ...n.data, label: `${n.data.label}` }
+      }));
+      
+      const newEdges = template.edges.map((e: any) => ({
+        ...e,
+        id: `${e.id}-${suffix}`,
+        source: `${e.source}-${suffix}`,
+        target: `${e.target}-${suffix}`
+      }));
+
+      setNodes(newNodes as any);
+      setEdges(newEdges as any);
     }
   };
 

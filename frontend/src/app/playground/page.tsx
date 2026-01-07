@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ReactFlowProvider } from "reactflow";
 import { DagBuilder } from "@/components/Playground/DagBuilder";
 import { NodeConfigPanel } from "@/components/Playground/NodeConfigPanel";
 import { EventLog } from "@/components/Playground/EventLog";
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
-import { simulateCrash, recoverSystem } from "@/lib/api";
+import { simulateCrash, recoverSystem, checkSystemStatus } from "@/lib/api";
 import { AlertOctagon, RotateCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,6 +17,14 @@ export default function PlaygroundPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [hasActiveDAG, setHasActiveDAG] = useState(false);
   const [recoverCooldown, setRecoverCooldown] = useState(false);
+
+  useEffect(() => {
+    checkSystemStatus()
+      .then(res => {
+        setIsCrashed(!res.running);
+      })
+      .catch(console.error);
+  }, []);
 
   const handleCrash = async () => {
     try {
@@ -116,7 +124,7 @@ export default function PlaygroundPage() {
             {/* @ts-expect-error - shadcn resizable panel group types mismatch in v4 */}
             <ResizablePanelGroup direction="vertical">
               <ResizablePanel defaultSize={70}>
-                {/* @ts-expect-error */}
+                {/* @ts-expect-error - shadcn resizable panel group types mismatch in v4 */}
                 <ResizablePanelGroup direction="horizontal">
                   <ResizablePanel defaultSize={75} minSize={50}>
                     <DagBuilder onSubmitSuccess={() => setHasActiveDAG(true)} />

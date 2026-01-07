@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { ArrowRight, Activity, Network, Database } from "lucide-react";
 import { motion } from "framer-motion";
 import { LiveStats } from "@/components/Landing/LiveStats";

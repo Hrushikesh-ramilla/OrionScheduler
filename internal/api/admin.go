@@ -32,7 +32,7 @@ func (a *AdminHandler) Mux() http.Handler {
 	mux.HandleFunc("/admin/simulate-crash", a.handleCrash)
 	mux.HandleFunc("/admin/recover", a.handleRecover)
 	mux.HandleFunc("/admin/status", a.handleStatus)
-	return mux
+	return corsMiddleware(mux)
 }
 
 // POST /admin/simulate-crash — kills the scheduler, workers stop.

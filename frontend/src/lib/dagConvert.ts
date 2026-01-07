@@ -1,5 +1,5 @@
 import { Node, Edge } from "reactflow";
-import { Task, TaskNodeData } from "@/types";
+import { Task } from "@/types";
 
 /**
  * Converts React Flow nodes and edges into the Task array format

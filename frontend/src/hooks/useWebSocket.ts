@@ -16,6 +16,11 @@ export function useWebSocket({ url = defaultWS, onMessage, reconnectInterval = 3
   const reconnectTimer = useRef<NodeJS.Timeout | null>(null);
   const isMounted = useRef(true);
 
+  const onMessageRef = useRef(onMessage);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+  }, [onMessage]);
+
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN || ws.current?.readyState === WebSocket.CONNECTING) {
       return;
@@ -30,10 +35,10 @@ export function useWebSocket({ url = defaultWS, onMessage, reconnectInterval = 3
     };
 
     socket.onmessage = (event) => {
-      if (onMessage) {
+      if (onMessageRef.current) {
         try {
           const data = JSON.parse(event.data);
-          onMessage(data);
+          onMessageRef.current(data);
         } catch (err) {
           console.error("Failed to parse websocket message", err);
         }
@@ -55,7 +60,7 @@ export function useWebSocket({ url = defaultWS, onMessage, reconnectInterval = 3
       // Let onclose handle the reconnect
       socket.close();
     };
-  }, [url, onMessage, reconnectInterval]);
+  }, [url, reconnectInterval]);
 
   useEffect(() => {
     isMounted.current = true;

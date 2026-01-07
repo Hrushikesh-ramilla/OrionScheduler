@@ -3,7 +3,7 @@
 import { Handle, Position, NodeProps } from "reactflow";
 import { cn } from "@/lib/utils";
 import { TaskStatus } from "@/types";
-import { Clock, AlertTriangle, CheckCircle, Play, Loader2, RefreshCcw, Skull } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle, Loader2, RefreshCcw, Skull } from "lucide-react";
 
 export type TaskNodeData = {
   label: string;

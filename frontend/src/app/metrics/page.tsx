@@ -1,11 +1,11 @@
 "use client";
 
-import { Activity, Server, CheckCircle2, Clock, AlertCircle, Database } from "lucide-react";
+import { Activity, Server, CheckCircle2, Clock, Database } from "lucide-react";
 import { useEffect, useState } from "react";
 import { MetricCard } from "@/components/Metrics/MetricCard";
 import { ThroughputChart } from "@/components/Metrics/ThroughputChart";
 import { LatencyChart } from "@/components/Metrics/LatencyChart";
-import { useMetricsState, TimeSeriesPoint } from "@/hooks/useMetricsState";
+import { useMetricsState } from "@/hooks/useMetricsState";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { fetchLiveMetrics, fetchDags } from "@/lib/api";
 
