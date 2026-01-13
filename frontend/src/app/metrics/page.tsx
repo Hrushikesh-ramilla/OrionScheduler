@@ -1,13 +1,40 @@
 "use client";
 
 import { Activity, Server, CheckCircle2, Clock } from "lucide-react";
+import { useEffect } from "react";
 import { MetricCard } from "@/components/Metrics/MetricCard";
 import { ThroughputChart } from "@/components/Metrics/ThroughputChart";
 import { LatencyChart } from "@/components/Metrics/LatencyChart";
-import { useMetricsState } from "@/hooks/useMetricsState";
+import { useMetricsState, TimeSeriesPoint } from "@/hooks/useMetricsState";
+import { useWebSocket } from "@/hooks/useWebSocket";
 
 export default function MetricsPage() {
-  const { summary, timeSeries } = useMetricsState();
+  const { summary, setSummary, timeSeries, addDataPoint } = useMetricsState();
+
+  useWebSocket({
+    onMessage: (data: any) => {
+      if (data.type === "metrics.update" && data.payload) {
+        const payload = data.payload;
+        
+        // Ensure a valid default value is passed for timestamps or formatted correctly
+        const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        setSummary({
+          runningNodes: 1,
+          activeTasks: payload.queue_size || 0,
+          completedTasks: payload.total_completed || 0,
+          failedTasks: payload.total_failed || 0,
+          uptimeSeconds: Math.floor((payload.uptime_ms || 0) / 1000),
+        });
+
+        addDataPoint({
+          timestamp,
+          tasksPerSec: payload.tasks_per_sec || 0,
+          avgLatencyMs: payload.avg_latency_ms || 0
+        });
+      }
+    }
+  });
 
   return (
     <div className="container mx-auto px-4 py-8">
