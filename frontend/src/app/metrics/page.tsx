@@ -62,24 +62,24 @@ export default function MetricsPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight mb-2 flex items-center gap-2">
-            <Activity className="w-8 h-8 text-primary" />
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-2 flex items-center gap-2">
+            <Activity className="w-6 h-6 md:w-8 md:h-8 text-primary" />
             System Metrics
           </h1>
-          <p className="text-muted-foreground">Real-time observability and throughput monitoring.</p>
+          <p className="text-sm md:text-base text-muted-foreground">Real-time observability and throughput monitoring.</p>
         </div>
-        <div className="flex items-center gap-3 bg-card border px-4 py-2 rounded-full shadow-sm">
+        <div className="flex items-center gap-2 md:gap-3 bg-card border px-3 md:px-4 py-1.5 md:py-2 rounded-full shadow-sm">
           <div className="relative flex items-center justify-center">
-            <span className={`absolute inline-flex w-3 h-3 rounded-full opacity-75 animate-ping ${summary.runningNodes > 0 ? 'bg-emerald-500' : 'bg-destructive'}`}></span>
+            <span className={`absolute inline-flex w-2.5 h-2.5 md:w-3 md:h-3 rounded-full opacity-75 animate-ping ${summary.runningNodes > 0 ? 'bg-emerald-500' : 'bg-destructive'}`}></span>
             <span className={`relative inline-flex rounded-full w-2 h-2 ${summary.runningNodes > 0 ? 'bg-emerald-500' : 'bg-destructive'}`}></span>
           </div>
-          <span className="text-sm font-medium">Cluster {summary.runningNodes > 0 ? 'Healthy' : 'Offline'}</span>
+          <span className="text-xs md:text-sm font-medium">Cluster <span className="hidden sm:inline">{summary.runningNodes > 0 ? 'Healthy' : 'Offline'}</span></span>
         </div>
       </div>
 
-      <div className="space-y-8">
+      <div className="space-y-6 md:space-y-8">
         {/* Metric Cards Grid - Commit 66 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
           <MetricCard 
             title="Running Nodes" 
             value={summary.runningNodes} 
