@@ -16,9 +16,10 @@ export function ThroughputChart({ data }: ThroughputChartProps) {
               <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} vertical={false} />
               <XAxis 
                 dataKey="timestamp" 
-                tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
+                tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                 axisLine={false}
                 tickLine={false}
+                minTickGap={20}
               />
               <YAxis 
                 tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
