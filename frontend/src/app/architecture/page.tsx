@@ -128,6 +128,24 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
+        {/* Guarantees */}
+        <section className="space-y-6">
+          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Delivery Guarantees</h2>
+          <div className="space-y-4 text-muted-foreground">
+            <p>
+              OrionScheduler provides <strong>At-Least-Once</strong> execution guarantees for underlying tasks, and <strong>Exactly-Once</strong> graph completion semantics.
+            </p>
+            <ul className="list-disc pl-6 space-y-2">
+              <li>
+                <strong className="text-foreground">At-Least-Once (Tasks):</strong> Because tasks can execute externally (e.g. system commands, HTTP calls), a crash immediately after the external action succeeds—but before the WAL logs <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">COMPLETED</code>—will cause that task to be re-run on recovery.
+              </li>
+              <li>
+                <strong className="text-foreground">Exactly-Once (DAG structure):</strong> The graph state machine itself will never transition a child node more than once, and will never mark the overall DAG completed until every node has resolved.
+              </li>
+            </ul>
+          </div>
+        </section>
+
       </div>
     </div>
   );
