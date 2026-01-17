@@ -2,21 +2,21 @@ import { Activity, Network, Database, Zap } from "lucide-react";
 
 export default function ArchitecturePage() {
   return (
-    <div className="container mx-auto px-4 py-12 max-w-4xl">
-      <div className="space-y-4 mb-16 border-b pb-8">
-        <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-primary/10 text-primary mb-2">
+    <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-20 max-w-4xl">
+      <div className="space-y-4 mb-12 md:mb-16 border-b pb-6 md:pb-8">
+        <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] md:text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-primary/10 text-primary mb-2">
           System Design
         </div>
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight">Architecture & Guarantees</h1>
-        <p className="text-xl text-muted-foreground leading-relaxed">
+        <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight">Architecture & Guarantees</h1>
+        <p className="text-lg md:text-xl text-muted-foreground leading-relaxed">
           OrionScheduler is built to do one thing exceptionally well: execute Directed Acyclic Graphs (DAGs) on a single node with strict crash resilience.
         </p>
       </div>
 
-      <div className="space-y-24">
+      <div className="space-y-16 md:space-y-24">
         {/* Placeholder for Commit 77: System Diagram */}
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">System Overview</h2>
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">System Overview</h2>
           <div className="bg-card w-full border rounded-xl p-8 shadow-sm overflow-x-auto">
             <div className="min-w-[600px] flex flex-col items-center gap-8 font-mono text-sm">
               <div className="flex gap-16 w-full justify-center">
@@ -71,13 +71,13 @@ export default function ArchitecturePage() {
           </div>
         </section>
 
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">DAG Execution (Kahn's Algorithm)</h2>
-          <div className="space-y-4 text-muted-foreground">
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">DAG Execution (Kahn's Algorithm)</h2>
+          <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
               The topological sorting of tasks is driven by a modified version of Kahn's Algorithm. When a DAG is submitted:
             </p>
-            <ol className="list-decimal pl-6 space-y-2">
+            <ol className="list-decimal pl-5 md:pl-6 space-y-2">
               <li>An adjacency matrix and in-degree count map are computed for all nodes.</li>
               <li>Nodes with an in-degree of <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono text-foreground">0</code> (no dependencies) are immediately pushed into the 'Ready' queue.</li>
               <li>Worker goroutines pull from the 'Ready' queue and execute tasks concurrently.</li>
@@ -102,9 +102,9 @@ func (s *Scheduler) validateAndSort(tasks []Task) error {
           </div>
         </section>
 
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Crash Recovery via WAL</h2>
-          <div className="space-y-4 text-muted-foreground">
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">Crash Recovery via WAL</h2>
+          <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
               The most critical guarantee of OrionScheduler is crash consistency. This is achieved through a Write-Ahead Log (WAL).
             </p>
@@ -136,9 +136,9 @@ func (w *WAL) Append(entry LogEntry) error {
         </section>
 
         {/* WebSocket Telemetry */}
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Real-time Telemetry (WebSocket)</h2>
-          <div className="space-y-4 text-muted-foreground">
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">Real-time Telemetry (WebSocket)</h2>
+          <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
               Observability is a core feature, built on top of Gorilla WebSockets. Tracking distributed application states is usually delegated to separated monitoring stacks (e.g. Prometheus + Grafana). OrionScheduler ships with built-in instrumentation.
             </p>
@@ -149,9 +149,9 @@ func (w *WAL) Append(entry LogEntry) error {
         </section>
 
         {/* Guarantees */}
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Delivery Guarantees</h2>
-          <div className="space-y-4 text-muted-foreground">
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">Delivery Guarantees</h2>
+          <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
               OrionScheduler provides <strong>At-Least-Once</strong> execution guarantees for underlying tasks, and <strong>Exactly-Once</strong> graph completion semantics.
             </p>
@@ -167,9 +167,9 @@ func (w *WAL) Append(entry LogEntry) error {
         </section>
 
         {/* Performance Trade-offs */}
-        <section className="space-y-6">
-          <h2 className="text-2xl font-bold tracking-tight border-b pb-2">Single Node Trade-offs</h2>
-          <div className="space-y-4 text-muted-foreground">
+        <section className="space-y-4 md:space-y-6">
+          <h2 className="text-xl md:text-2xl font-bold tracking-tight border-b pb-2">Single Node Trade-offs</h2>
+          <div className="space-y-4 text-sm md:text-base text-muted-foreground">
             <p>
               By restricting OrionScheduler to a single machine, we bypass distributed system orchestration taxes (e.g. Paxos consensus, network partition recovery, split-brain). This decision yields extreme performance for the scheduler core.
             </p>
