@@ -86,8 +86,13 @@ func main() {
 	rootMux.Handle("/admin/", adminHandler.Mux())
 	rootMux.Handle("/", handler)
 
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	server := &http.Server{
-		Addr:         ":8080",
+		Addr:         ":" + port,
 		Handler:      rootMux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -96,7 +101,7 @@ func main() {
 
 	// Run the HTTP server in a separate goroutine.
 	go func() {
-		slog.Info("HTTP server listening", "port", 8080)
+		slog.Info("HTTP server listening", "port", port)
 		slog.Info("POST /api/v1/dag     -> Submit a task DAG")
 		slog.Info("GET  /api/v1/status   -> System metrics")
 		slog.Info("GET  /api/v1/metrics/live -> Live metrics (JSON)")
