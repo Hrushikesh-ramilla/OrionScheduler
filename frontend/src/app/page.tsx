@@ -1,124 +1,359 @@
 "use client";
 
-import Link from "next/link";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { ArrowRight, Activity, Network, Database } from "lucide-react";
-import { motion } from "framer-motion";
-import { LiveStats } from "@/components/Landing/LiveStats";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ReactFlowProvider } from "reactflow";
+import { Toaster, toast } from "sonner";
+
+import { ControlSidebar } from "@/components/Console/ControlSidebar";
+import { DagCanvas, DagCanvasHandle } from "@/components/Console/DagCanvas";
+import { EnhancedEventStream } from "@/components/Console/EnhancedEventStream";
+import { SystemInternalsPanel } from "@/components/Console/SystemInternalsPanel";
+import { SystemStatusBar } from "@/components/Console/SystemStatusBar";
+import { WorkerPoolPanel } from "@/components/Console/WorkerPoolPanel";
+import { useWebSocket, WebSocketProvider } from "@/hooks/useWebSocket";
+import { adminControlsAvailable, fetchAdminStatus, recoverSystem, simulateCrash } from "@/lib/api";
+import { DAG_TEMPLATES } from "@/lib/templates";
 import { cn } from "@/lib/utils";
+import { TaskEvent } from "@/types";
 
-export default function Home() {
+type SystemState = "WARMING" | "ONLINE" | "OFFLINE" | "RECOVERING" | "CRASHING" | "BACKEND_OFFLINE";
+
+export default function OrchestratorConsole() {
   return (
-    <div className="flex flex-col min-h-[calc(100vh-4rem)]">
-      {/* Hero Section */}
-      <section className="flex-1 flex flex-col items-center justify-center text-center px-4 py-20 bg-gradient-to-b from-background to-muted/20">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="max-w-4xl max-auto space-y-6"
-        >
-          <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-secondary text-secondary-foreground mb-4">
-            <span className="flex w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
-            System Online
-          </div>
-          
-          <h1 className="text-5xl md:text-7xl font-bold tracking-tight">
-            Orion<span className="text-primary">Scheduler</span>
-          </h1>
-          
-          <p className="text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-            A crash-consistent DAG execution engine. Submit workflows. Break things. Watch it recover.
-          </p>
-          
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-8">
-            <Link 
-              href="/playground" 
-              className={cn(buttonVariants({ size: "lg" }), "rounded-full px-8 h-14 text-base gap-2")}
-            >
-              Enter Playground <ArrowRight className="w-5 h-5" />
-            </Link>
-            <Link 
-              href="/metrics" 
-              className={cn(buttonVariants({ variant: "outline", size: "lg" }), "rounded-full px-8 h-14 text-base gap-2 bg-background")}
-            >
-              <Activity className="w-5 h-5" /> View Live Metrics
-            </Link>
-          </div>
-        </motion.div>
-      </section>
+    <WebSocketProvider>
+      <ConsoleShell />
+    </WebSocketProvider>
+  );
+}
 
-      {/* Features Grid */}
-      <section className="py-20 px-4">
-        <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
-            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center text-primary">
-              <Network className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-bold">DAG Execution</h3>
-            <p className="text-muted-foreground">Kahn's algorithm-based valid DAG scheduling. Built to handle complex dependencies natively in Go.</p>
+function ConsoleShell() {
+  const [systemState, setSystemState] = useState<SystemState>("WARMING");
+  const [isCrashed, setIsCrashed] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [hasActiveDAG, setHasActiveDAG] = useState(false);
+  const [recoverCooldown, setRecoverCooldown] = useState(false);
+  const [isAutoDemoRunning, setIsAutoDemoRunning] = useState(false);
+  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("disconnected");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [adminControlsEnabled, setAdminControlsEnabled] = useState(false);
+
+  const dagRef = useRef<DagCanvasHandle>(null);
+  const backendMutationInFlight = useRef(false);
+  const lastTaskStartedAt = useRef(0);
+  const backendUnavailable = systemState === "WARMING" || systemState === "BACKEND_OFFLINE";
+
+  useWebSocket({
+    onMessage: (event: TaskEvent) => {
+      if (event.type === "task.started") {
+        lastTaskStartedAt.current = Date.now();
+      }
+    },
+  });
+
+  const syncBackendStatus = useCallback(async () => {
+    if (backendMutationInFlight.current) return;
+
+    try {
+      const status = await fetchAdminStatus();
+      setIsCrashed(!status.running);
+      setSystemState(status.running ? "ONLINE" : "OFFLINE");
+    } catch {
+      setIsCrashed(false);
+      setSystemState("BACKEND_OFFLINE");
+    }
+  }, []);
+
+  useEffect(() => {
+    syncBackendStatus();
+    const interval = setInterval(syncBackendStatus, 5000);
+    return () => clearInterval(interval);
+  }, [syncBackendStatus]);
+
+  useEffect(() => {
+    setAdminControlsEnabled(adminControlsAvailable());
+  }, []);
+
+  const handleCrash = useCallback(async () => {
+    if (!adminControlsEnabled) {
+      toast.error("Crash control requires a demo token.", { duration: 3500 });
+      return;
+    }
+    if (backendUnavailable) {
+      toast.error("Backend is not reachable yet. Demo controls are paused.", { duration: 3500 });
+      return;
+    }
+
+    backendMutationInFlight.current = true;
+    try {
+      setIsProcessing(true);
+      setSystemState("CRASHING");
+      await simulateCrash();
+      setIsCrashed(true);
+      setSystemState("OFFLINE");
+      toast.error("Crash command accepted. Scheduler is offline.", { duration: 4000 });
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    } catch (err: any) {
+      toast.error(err.message || "Failed to simulate crash");
+      backendMutationInFlight.current = false;
+      setSystemState("WARMING");
+      await syncBackendStatus();
+    } finally {
+      backendMutationInFlight.current = false;
+      setIsProcessing(false);
+    }
+  }, [adminControlsEnabled, backendUnavailable, syncBackendStatus]);
+
+  const handleRecover = useCallback(async () => {
+    if (!adminControlsEnabled) {
+      toast.error("Recovery control requires a demo token.", { duration: 3500 });
+      return;
+    }
+    if (backendUnavailable) {
+      toast.error("Backend is not reachable yet. Recovery is unavailable.", { duration: 3500 });
+      return;
+    }
+
+    backendMutationInFlight.current = true;
+    try {
+      setIsProcessing(true);
+      setSystemState("RECOVERING");
+      toast.info("Requesting scheduler recovery...", { duration: 3000 });
+      await recoverSystem();
+      setIsCrashed(false);
+      setSystemState("ONLINE");
+      toast.success("Recovery command completed. See events for replay details.", { duration: 4000 });
+      setRecoverCooldown(true);
+      setTimeout(() => setRecoverCooldown(false), 2000);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to recover system");
+      backendMutationInFlight.current = false;
+      setSystemState("WARMING");
+      await syncBackendStatus();
+    } finally {
+      backendMutationInFlight.current = false;
+      setIsProcessing(false);
+    }
+  }, [adminControlsEnabled, backendUnavailable, syncBackendStatus]);
+
+  const handleAutoDemo = useCallback(async () => {
+    if (!dagRef.current) return;
+    if (!adminControlsEnabled) {
+      toast.error("Auto demo requires a demo token for crash/recovery.", { duration: 3500 });
+      return;
+    }
+    if (backendUnavailable) {
+      toast.error("Backend is not reachable yet. Auto demo is paused.", { duration: 3500 });
+      return;
+    }
+
+    const template = DAG_TEMPLATES.complex;
+    const demoStartedAt = Date.now();
+    try {
+      setIsAutoDemoRunning(true);
+      dagRef.current.loadTemplate(template.id);
+      toast.info(
+        `AUTO DEMO: Loaded ${template.name} (${template.nodes.length} tasks, ${template.edges.length} dependencies).`,
+        { duration: 3000 },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      setIsSubmitting(true);
+      const accepted = await dagRef.current.handleSubmit();
+      if (!accepted) {
+        throw new Error("DAG submission was rejected by the backend.");
+      }
+      setHasActiveDAG(true);
+      setIsSubmitting(false);
+      toast.info("AUTO DEMO: Submit accepted. Waiting for first worker event.", { duration: 3000 });
+      const sawTaskStart = await waitForEvidence(() => lastTaskStartedAt.current >= demoStartedAt, 4000);
+      if (!sawTaskStart) {
+        throw new Error("No task.started event arrived after submit.");
+      }
+
+      toast.warning("AUTO DEMO: Sending crash command.", { duration: 3000 });
+      await handleCrash();
+      const crashObserved = await waitForEvidence(async () => {
+        const status = await fetchAdminStatus();
+        return !status.running;
+      }, 4000);
+      if (!crashObserved) {
+        throw new Error("Backend did not confirm scheduler crash.");
+      }
+
+      toast.info("AUTO DEMO: Sending recovery command.", { duration: 3000 });
+      await handleRecover();
+      const recoveryObserved = await waitForEvidence(async () => {
+        const status = await fetchAdminStatus();
+        return status.running;
+      }, 5000);
+      if (!recoveryObserved) {
+        throw new Error("Backend did not confirm scheduler recovery.");
+      }
+
+      toast.success("AUTO DEMO: Recovery command finished. Event stream shows backend details.", { duration: 5000 });
+    } catch {
+      toast.error("AUTO DEMO stopped before crash or recovery.", { duration: 4000 });
+    } finally {
+      setIsAutoDemoRunning(false);
+      setIsSubmitting(false);
+    }
+  }, [adminControlsEnabled, backendUnavailable, handleCrash, handleRecover]);
+
+  const handleLoadTemplate = useCallback((id: string) => {
+    dagRef.current?.loadTemplate(id);
+  }, []);
+
+  const handleSubmit = useCallback(async () => {
+    if (!dagRef.current) return;
+    if (backendUnavailable || isCrashed) {
+      toast.error("Backend or scheduler is unavailable. DAG was not submitted.", { duration: 3500 });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const accepted = await dagRef.current.handleSubmit();
+      if (accepted) setHasActiveDAG(true);
+    } catch {
+      // DagCanvas already shows the backend error; keep this handler quiet.
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [backendUnavailable, isCrashed]);
+
+  return (
+    <div className="h-screen flex flex-col overflow-hidden bg-background text-foreground">
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: {
+            background: "hsl(220,22%,9%)",
+            border: "1px solid hsl(220,15%,20%)",
+            color: "hsl(210,20%,92%)",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "11px",
+            borderRadius: "2px",
+          },
+        }}
+      />
+
+      <SystemStatusBar
+        systemState={systemState}
+        wsStatus={wsStatus}
+      />
+
+      {systemState === "BACKEND_OFFLINE" && (
+        <div className="shrink-0 px-4 py-2 flex items-center gap-3 bg-red-950/35 border-b border-red-500/35">
+          <div className="w-2 h-2 rounded-full bg-red-500" />
+          <span className="text-[11px] font-bold tracking-widest text-red-300">
+            BACKEND OFFLINE - controls that call the API are disabled
+          </span>
+        </div>
+      )}
+
+      {systemState === "WARMING" && (
+        <div className="shrink-0 px-4 py-2 flex items-center gap-3 bg-amber-950/30 border-b border-amber-500/30">
+          <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          <span className="text-[11px] font-bold tracking-widest text-amber-300">
+            CHECKING BACKEND - API controls will enable after status returns
+          </span>
+        </div>
+      )}
+
+      {isCrashed && systemState === "OFFLINE" && (
+        <div className={cn(
+          "shrink-0 px-4 py-2 flex items-center gap-3 bg-red-950/40 border-b border-red-500/40",
+          "crash-flash",
+        )}>
+          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-[11px] font-bold tracking-widest text-red-400">
+            SCHEDULER OFFLINE - backend is reachable, scheduler reports stopped
+          </span>
+          <button
+            onClick={handleRecover}
+            disabled={isProcessing || backendUnavailable || !adminControlsEnabled}
+            className="ml-auto text-[10px] border border-emerald-500/50 text-emerald-400 px-3 py-1 hover:bg-emerald-950/30 transition-all disabled:opacity-50"
+          >
+            REQUEST RECOVERY
+          </button>
+        </div>
+      )}
+
+      {systemState === "RECOVERING" && !isCrashed && (
+        <div className="shrink-0 px-4 py-2 flex items-center gap-3 bg-amber-950/30 border-b border-amber-500/30">
+          <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+          <span className="text-[11px] font-bold tracking-widest text-amber-400">
+            RECOVERY REQUEST IN FLIGHT - waiting for backend result
+          </span>
+        </div>
+      )}
+
+      <ReactFlowProvider>
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="w-52 shrink-0 border-r border-border overflow-y-auto overflow-x-hidden">
+            <ControlSidebar
+              systemState={systemState}
+              backendAvailable={!backendUnavailable}
+              adminControlsEnabled={adminControlsEnabled}
+              isCrashed={isCrashed}
+              isProcessing={isProcessing}
+              isAutoDemoRunning={isAutoDemoRunning}
+              hasActiveDAG={hasActiveDAG}
+              recoverCooldown={recoverCooldown}
+              onCrash={handleCrash}
+              onRecover={handleRecover}
+              onAutoDemo={handleAutoDemo}
+              onLoadTemplate={handleLoadTemplate}
+              onSubmit={handleSubmit}
+              isSubmitting={isSubmitting}
+              wsStatus={wsStatus}
+            />
           </div>
-          
-          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
-            <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500">
-              <Database className="w-6 h-6" />
+
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            <div className="flex-1 overflow-hidden relative">
+              <div className="absolute top-2 left-3 z-10 text-[9px] text-muted-foreground/40 tracking-widest select-none pointer-events-none">
+                DAG EXECUTION CANVAS
+              </div>
+              <DagCanvas
+                ref={dagRef}
+                onSubmitSuccess={() => setHasActiveDAG(true)}
+                onWsStatusChange={setWsStatus}
+              />
             </div>
-            <h3 className="text-xl font-bold">Crash Recovery</h3>
-            <p className="text-muted-foreground">Disk-backed Write-Ahead Log (WAL) ensures exactly-once execution. Rip the power cord out. It comes back.</p>
+
+            <div className="h-52 shrink-0 border-t border-border">
+              <EnhancedEventStream showMetricsTicks={false} />
+            </div>
           </div>
-          
-          <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
-            <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500">
-              <Activity className="w-6 h-6" />
+
+          <div className="w-56 shrink-0 border-l border-border flex flex-col overflow-hidden">
+            <div className="border-b border-border overflow-hidden" style={{ flex: "2 1 0" }}>
+              <WorkerPoolPanel />
             </div>
-            <h3 className="text-xl font-bold">Live Observability</h3>
-            <p className="text-muted-foreground">Real-time WebSocket telemetry for every single task state transition. Watch the magic happen.</p>
+            <div className="overflow-hidden min-h-0" style={{ flex: "3 1 0" }}>
+              <SystemInternalsPanel />
+            </div>
           </div>
         </div>
-      </section>
-
-      {/* Live Cluster Stats */}
-      <LiveStats />
-
-      {/* Crash Resilience Showcase */}
-      <section className="py-24 px-4 bg-muted/30 border-y">
-        <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center gap-12 text-center md:text-left">
-          <div className="flex-1 space-y-4">
-            <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 bg-destructive/10 text-destructive border-destructive/20 mb-2">
-              Fault Tolerance
-            </div>
-            <h2 className="text-3xl md:text-4xl font-bold tracking-tight">Zero State Loss. Guaranteed.</h2>
-            <p className="text-lg text-muted-foreground">
-              OrionScheduler employs an append-only Write-Ahead Log (WAL) that captures all state transitions before they are applied. Hardware failure? Process kill? Node eviction? The system replays the WAL on startup and resumes exactly where it left off.
-            </p>
-          </div>
-          <div className="flex-1 w-full bg-[#0D0D0D] rounded-xl border p-6 font-mono text-xs sm:text-sm text-left shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-destructive via-orange-500 to-emerald-500"></div>
-            <div className="space-y-2">
-              <p className="text-muted-foreground">$ kill -9 &lt;scheduler_pid&gt;</p>
-              <p className="text-destructive font-bold">[FATAL] Process terminated.</p>
-              <p className="text-muted-foreground mt-4">$ ./orionscheduler</p>
-              <p className="text-emerald-500">[INFO] Recovering WAL from disk...</p>
-              <p className="text-emerald-500">[INFO] Replayed 42 events.</p>
-              <p className="text-blue-500">[INFO] Resuming DAG execution.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="py-24 px-4 text-center max-w-3xl mx-auto space-y-8">
-        <h2 className="text-3xl md:text-5xl font-bold tracking-tight">Ready to break things?</h2>
-        <p className="text-xl text-muted-foreground">
-          Drop into the Playground. Submit multiple dependent tasks. Kill the server mid-execution. Watch Kahn's algorithm re-evaluate and the WAL recover lost state.
-        </p>
-        <Link 
-          href="/playground" 
-          className={cn(buttonVariants({ size: "lg" }), "rounded-full px-8 h-14 text-base gap-2")}
-        >
-          Start the Demo <ArrowRight className="w-5 h-5" />
-        </Link>
-      </section>
+      </ReactFlowProvider>
     </div>
   );
+}
+
+async function waitForEvidence(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs: number,
+  intervalMs = 100,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (await predicate()) return true;
+    } catch {
+      // Keep polling until timeout; transient fetch failures are expected during crash/recover.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
 }
