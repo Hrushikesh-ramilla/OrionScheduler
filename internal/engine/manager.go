@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go-enterprise-scheduler/internal/storage"
 	"go-enterprise-scheduler/pkg/models"
@@ -74,7 +75,8 @@ func (m *SchedulerManager) Start() *Scheduler {
 		completed := len(state.CompletedTasks)
 		failed := len(state.FailedTasks)
 		scheduler.emitEvent(models.TaskEvent{
-			Type: models.EventSystemRecover,
+			Type:      models.EventSystemRecover,
+			Timestamp: time.Now(),
 			Metadata: map[string]string{
 				"completed_recovered": fmt.Sprintf("%d", completed),
 				"failed_recovered":    fmt.Sprintf("%d", failed),
@@ -128,7 +130,8 @@ func (m *SchedulerManager) SimulateCrash() {
 		// Notify connected clients before killing the scheduler.
 		if m.scheduler != nil {
 			m.scheduler.emitEvent(models.TaskEvent{
-				Type: models.EventSystemCrash,
+				Type:      models.EventSystemCrash,
+				Timestamp: time.Now(),
 			})
 		}
 
@@ -139,10 +142,11 @@ func (m *SchedulerManager) SimulateCrash() {
 			m.dispatcher.Wait()
 		}
 		if m.scheduler != nil {
+			m.scheduler.Wait()
 			// Closing EventChan causes the hub.Run goroutine (which is ranging
 			// over this channel) to exit cleanly. Without this close, that
 			// goroutine leaks permanently on every crash/recover cycle.
-			close(m.scheduler.EventChan)
+			m.scheduler.CloseEventChan()
 		}
 		m.scheduler = nil
 		m.dispatcher = nil
@@ -157,4 +161,9 @@ func (m *SchedulerManager) SimulateCrash() {
 func (m *SchedulerManager) Recover() *Scheduler {
 	slog.Info("recovering scheduler from WAL...")
 	return m.Start()
+}
+
+// WorkerCount returns the configured worker pool size.
+func (m *SchedulerManager) WorkerCount() int {
+	return m.workerCount
 }

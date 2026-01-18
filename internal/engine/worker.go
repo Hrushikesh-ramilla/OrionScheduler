@@ -137,7 +137,9 @@ func (d *Dispatcher) worker(ctx context.Context, id int) {
 						telemetry.ActiveWorkers.Dec()
 						continue
 					}
-					d.scheduler.Fail(task.ID)
+					if ok := d.scheduler.Fail(task.ID, id); !ok {
+						slog.Warn("scheduler stopped before failure notification", "worker_id", id, "task_id", task.ID)
+					}
 					telemetry.ActiveWorkers.Dec()
 					continue
 				}
@@ -163,7 +165,9 @@ func (d *Dispatcher) worker(ctx context.Context, id int) {
 			if err := d.wal.AppendComplete(task.ID); err != nil {
 				slog.Error("failed to write completion to WAL", "worker_id", id, "error", err)
 			}
-			d.scheduler.Complete(task.ID)
+			if ok := d.scheduler.Complete(task.ID, id); !ok {
+				slog.Warn("scheduler stopped before completion notification", "worker_id", id, "task_id", task.ID)
+			}
 			log.Println("WORKER: finished task", task.ID)
 			slog.Info("finished task", "worker_id", id, "task_id", task.ID, "duration_ms", execTime.Milliseconds())
 

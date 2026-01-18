@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -13,7 +15,7 @@ import (
 	"go-enterprise-scheduler/pkg/telemetry"
 )
 
-// Atomic metrics — updated inside runLoop, read lock-free from any goroutine.
+// Atomic metrics are updated inside runLoop and read lock-free from any goroutine.
 type atomicMetrics struct {
 	pending   atomic.Int64
 	running   atomic.Int64
@@ -25,6 +27,15 @@ type atomicMetrics struct {
 type ingestReq struct {
 	tasks []models.Task
 	resp  chan error
+}
+
+// ErrSchedulerStopped is returned when a caller attempts to send work to a
+// scheduler whose run loop has already stopped.
+var ErrSchedulerStopped = errors.New("scheduler stopped")
+
+type taskWorkerReq struct {
+	taskID   string
+	workerID int
 }
 
 // walReplayFailReq carries the information needed to replay a WAL FAIL record.
@@ -58,8 +69,8 @@ type Scheduler struct {
 	metrics    atomicMetrics
 
 	ingestChan   chan ingestReq
-	completeChan chan string
-	failChan     chan string
+	completeChan chan taskWorkerReq
+	failChan     chan taskWorkerReq
 	popReqChan   chan chan *models.Task
 	retryChan    chan string
 
@@ -71,8 +82,9 @@ type Scheduler struct {
 		done    chan struct{}
 	}
 
-	readyChan chan *models.Task
-	queueSize atomic.Int64
+	readyChan  chan *models.Task
+	queueSize  atomic.Int64
+	retryDelay func(retryCount int) time.Duration
 
 	// EventChan receives task lifecycle events for external consumers (WebSocket hub).
 	// Buffered 1000-deep and sent non-blocking so the event loop is never stalled.
@@ -82,6 +94,11 @@ type Scheduler struct {
 	// droppedEvents counts events silently dropped when EventChan buffer is full.
 	// Exposed via DroppedEvents() and reported in /api/v1/metrics/live.
 	droppedEvents atomic.Int64
+
+	done        chan struct{}
+	wg          sync.WaitGroup
+	eventMu     sync.RWMutex
+	eventClosed bool
 
 	// getStateChan is used by GetTaskSnapshot to safely read task state from
 	// within the single-threaded runLoop without a data race.
@@ -96,8 +113,8 @@ func NewScheduler(wal *storage.WAL) *Scheduler {
 		readyQueue:         NewPriorityQueue(),
 		wal:                wal,
 		ingestChan:         make(chan ingestReq),
-		completeChan:       make(chan string),
-		failChan:           make(chan string),
+		completeChan:       make(chan taskWorkerReq),
+		failChan:           make(chan taskWorkerReq),
 		popReqChan:         make(chan chan *models.Task),
 		retryChan:          make(chan string),
 		replayStartChan:    make(chan string),
@@ -109,19 +126,51 @@ func NewScheduler(wal *storage.WAL) *Scheduler {
 		}),
 		readyChan:    make(chan *models.Task),
 		EventChan:    make(chan models.TaskEvent, 1000), // 1000-deep; drops are counted.
+		done:         make(chan struct{}),
+		retryDelay:   defaultRetryDelay,
 		getStateChan: make(chan chan map[string]TaskInfo),
 	}
+}
+
+func defaultRetryDelay(retryCount int) time.Duration {
+	delay := time.Duration(1<<retryCount) * time.Second
+	if delay > 30*time.Second {
+		return 30 * time.Second
+	}
+	return delay
 }
 
 // emitEvent sends a task event to external consumers without ever blocking
 // the scheduler event loop. If the channel buffer is full, the event is dropped
 // and the droppedEvents counter is incremented so the drop is observable.
 func (s *Scheduler) emitEvent(event models.TaskEvent) {
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+
+	s.eventMu.RLock()
+	defer s.eventMu.RUnlock()
+	if s.eventClosed {
+		return
+	}
+
 	select {
 	case s.EventChan <- event:
 	default:
 		s.droppedEvents.Add(1)
 	}
+}
+
+// CloseEventChan closes the external event stream after all scheduler and
+// worker goroutines have stopped. It is safe to call more than once.
+func (s *Scheduler) CloseEventChan() {
+	s.eventMu.Lock()
+	defer s.eventMu.Unlock()
+	if s.eventClosed {
+		return
+	}
+	close(s.EventChan)
+	s.eventClosed = true
 }
 
 // DroppedEvents returns the cumulative count of events dropped due to
@@ -131,12 +180,23 @@ func (s *Scheduler) DroppedEvents() int64 {
 	return s.droppedEvents.Load()
 }
 
+// Wait blocks until scheduler-owned goroutines have exited.
+func (s *Scheduler) Wait() {
+	s.wg.Wait()
+}
+
 func (s *Scheduler) Start(ctx context.Context) {
-	go s.runLoop(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runLoop(ctx)
+	}()
 	// Emit metrics snapshots every second so the frontend charts stay live.
 	// This goroutine exits when the scheduler context is cancelled (SimulateCrash),
 	// so charts stop updating after crash and resume after recovery.
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -164,7 +224,11 @@ func (s *Scheduler) Start(ctx context.Context) {
 }
 
 func (s *Scheduler) StartDispatch(ctx context.Context) {
-	go s.pushLoop(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.pushLoop(ctx)
+	}()
 }
 
 func (s *Scheduler) ReadyTasks() <-chan *models.Task {
@@ -172,6 +236,8 @@ func (s *Scheduler) ReadyTasks() <-chan *models.Task {
 }
 
 func (s *Scheduler) runLoop(ctx context.Context) {
+	defer close(s.done)
+
 	for {
 		var activePopReq chan chan *models.Task
 		if s.readyQueue.Len() > 0 {
@@ -200,11 +266,11 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 		case req := <-s.ingestChan:
 			s.handleIngest(req)
 
-		case taskID := <-s.completeChan:
-			s.handleComplete(taskID)
+		case req := <-s.completeChan:
+			s.handleComplete(req)
 
-		case taskID := <-s.failChan:
-			s.handleFailure(taskID)
+		case req := <-s.failChan:
+			s.handleFailure(req)
 
 		case taskID := <-s.replayStartChan:
 			s.handleReplayStart(taskID)
@@ -249,11 +315,39 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 
 func (s *Scheduler) handleIngest(req ingestReq) {
 	log.Println("SCHED: ingest")
+	batchIDs := make(map[string]bool, len(req.tasks))
 	for i := range req.tasks {
 		t := &req.tasks[i]
+		if t.ID == "" {
+			req.resp <- fmt.Errorf("scheduler: task ID is required")
+			return
+		}
+		if batchIDs[t.ID] {
+			req.resp <- fmt.Errorf("scheduler: duplicate task ID %q", t.ID)
+			return
+		}
 		if _, exists := s.tasks[t.ID]; exists {
 			req.resp <- fmt.Errorf("scheduler: duplicate task ID %q", t.ID)
 			return
+		}
+		batchIDs[t.ID] = true
+	}
+
+	for i := range req.tasks {
+		t := &req.tasks[i]
+		depSeen := make(map[string]bool, len(t.Dependencies))
+		for _, depID := range t.Dependencies {
+			if depSeen[depID] {
+				req.resp <- fmt.Errorf("scheduler: task %q has duplicate dependency %q", t.ID, depID)
+				return
+			}
+			depSeen[depID] = true
+			if !batchIDs[depID] {
+				if _, exists := s.tasks[depID]; !exists {
+					req.resp <- fmt.Errorf("scheduler: task %q depends on unknown task %q", t.ID, depID)
+					return
+				}
+			}
 		}
 	}
 
@@ -266,12 +360,17 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 			t.MaxRetries = 3 // sensible default
 		}
 		s.tasks[t.ID] = t
-		s.inDegree[t.ID] = len(t.Dependencies)
 		taskIDs = append(taskIDs, t.ID)
 
+		unmetDeps := 0
 		for _, depID := range t.Dependencies {
+			if depTask, exists := s.tasks[depID]; exists && depTask.Status == models.StatusCompleted {
+				continue
+			}
+			unmetDeps++
 			s.dependents[depID] = append(s.dependents[depID], t.ID)
 		}
+		s.inDegree[t.ID] = unmetDeps
 	}
 
 	telemetry.TasksIngestedTotal.Add(float64(len(req.tasks)))
@@ -286,7 +385,7 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 		t := &req.tasks[i]
 		if s.inDegree[t.ID] == 0 {
 			t.Status = models.StatusReady
-			// pending→ready is still "pending" in metrics (both count as pending)
+			// pending-to-ready is still "pending" in metrics (both count as pending)
 			s.readyQueue.Enqueue(t)
 			s.queueSize.Add(1)
 			telemetry.CurrentQueueSize.Inc()
@@ -297,11 +396,57 @@ func (s *Scheduler) handleIngest(req ingestReq) {
 	req.resp <- nil
 }
 
-func (s *Scheduler) handleComplete(taskID string) {
+func (s *Scheduler) transitionToCompleted(task *models.Task) bool {
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed:
+		return false
+	case models.StatusPending, models.StatusReady:
+		s.metrics.pending.Add(-1)
+	case models.StatusRunning:
+		s.metrics.running.Add(-1)
+	}
+	s.metrics.completed.Add(1)
+	task.Status = models.StatusCompleted
+	return true
+}
+
+func (s *Scheduler) transitionToFailed(task *models.Task, countTelemetry bool) bool {
+	switch task.Status {
+	case models.StatusCompleted, models.StatusFailed:
+		return false
+	case models.StatusPending, models.StatusReady:
+		s.metrics.pending.Add(-1)
+	case models.StatusRunning:
+		s.metrics.running.Add(-1)
+	}
+	s.metrics.failed.Add(1)
+	task.Status = models.StatusFailed
+	task.Cancelled.Store(1)
+	if countTelemetry {
+		telemetry.TasksFailedTotal.Inc()
+	}
+	return true
+}
+
+func (s *Scheduler) markReady(task *models.Task) {
+	if task.Status == models.StatusFailed || task.Status == models.StatusCompleted {
+		return
+	}
+	task.Status = models.StatusReady
+	s.readyQueue.Enqueue(task)
+	s.queueSize.Add(1)
+	telemetry.CurrentQueueSize.Inc()
+}
+
+func (s *Scheduler) handleComplete(req taskWorkerReq) {
 	log.Println("SCHED: complete")
-	task, exists := s.tasks[taskID]
+	task, exists := s.tasks[req.taskID]
 	if !exists {
-		slog.Warn("attempted to complete unknown task", "task_id", taskID)
+		slog.Warn("attempted to complete unknown task", "task_id", req.taskID, "worker_id", req.workerID)
+		return
+	}
+	if task.Status != models.StatusRunning {
+		slog.Warn("ignoring completion for non-running task", "task_id", req.taskID, "worker_id", req.workerID, "status", task.Status)
 		return
 	}
 
@@ -310,47 +455,45 @@ func (s *Scheduler) handleComplete(taskID string) {
 		duration = task.EndTime.Sub(task.StartTime).Seconds() * 1000
 	}
 
-	s.metrics.running.Add(-1)
-	s.metrics.completed.Add(1)
-	task.Status = models.StatusCompleted
+	s.transitionToCompleted(task)
 	telemetry.TasksCompletedTotal.Inc()
-	slog.Info("task completed", "task_id", taskID)
+	slog.Info("task completed", "task_id", req.taskID, "worker_id", req.workerID)
 
 	s.emitEvent(models.TaskEvent{
 		Type:      models.EventTaskCompleted,
-		TaskID:    taskID,
+		TaskID:    req.taskID,
+		WorkerID:  req.workerID,
 		Duration:  duration,
 		Timestamp: time.Now(),
 	})
 
-	for _, depID := range s.dependents[taskID] {
+	for _, depID := range s.dependents[req.taskID] {
 		s.inDegree[depID]--
 		if s.inDegree[depID] == 0 {
 			depTask := s.tasks[depID]
-			depTask.Status = models.StatusReady
-			s.readyQueue.Enqueue(depTask)
-			s.queueSize.Add(1)
-			telemetry.CurrentQueueSize.Inc()
+			s.markReady(depTask)
 			log.Println("SCHED: task ready")
 			slog.Info("task ready", "task_id", depID, "reason", "deps_satisfied")
 		}
 	}
 }
 
-func (s *Scheduler) handleFailure(taskID string) {
-	task, exists := s.tasks[taskID]
+func (s *Scheduler) handleFailure(req taskWorkerReq) {
+	task, exists := s.tasks[req.taskID]
 	if !exists {
+		slog.Warn("attempted to fail unknown task", "task_id", req.taskID, "worker_id", req.workerID)
+		return
+	}
+	if task.Status != models.StatusRunning {
+		slog.Warn("ignoring failure for non-running task", "task_id", req.taskID, "worker_id", req.workerID, "status", task.Status)
 		return
 	}
 
 	if task.RetryCount < task.MaxRetries {
 		task.RetryCount++
 		telemetry.TasksRetriedTotal.Inc()
-		delay := time.Duration(1<<task.RetryCount) * time.Second
-		if delay > 30*time.Second {
-			delay = 30 * time.Second
-		}
-		slog.Warn("task failed, retrying", "task_id", taskID, "delay", delay.String(), "attempt", task.RetryCount, "max_retries", task.MaxRetries)
+		delay := s.retryDelay(task.RetryCount)
+		slog.Warn("task failed, retrying", "task_id", req.taskID, "worker_id", req.workerID, "delay", delay.String(), "attempt", task.RetryCount, "max_retries", task.MaxRetries)
 
 		s.metrics.running.Add(-1)
 		s.metrics.pending.Add(1)
@@ -359,26 +502,31 @@ func (s *Scheduler) handleFailure(taskID string) {
 
 		s.emitEvent(models.TaskEvent{
 			Type:      models.EventTaskRetry,
-			TaskID:    taskID,
+			TaskID:    req.taskID,
+			WorkerID:  req.workerID,
 			Retry:     task.RetryCount,
 			MaxRetry:  task.MaxRetries,
 			Timestamp: time.Now(),
 		})
 
 		time.AfterFunc(delay, func() {
-			s.retryChan <- taskID
+			select {
+			case s.retryChan <- req.taskID:
+			case <-s.done:
+			}
 		})
 	} else {
 		s.emitEvent(models.TaskEvent{
 			Type:      models.EventTaskFailed,
-			TaskID:    taskID,
+			TaskID:    req.taskID,
+			WorkerID:  req.workerID,
 			Retry:     task.RetryCount,
 			MaxRetry:  task.MaxRetries,
 			Timestamp: time.Now(),
 		})
 
-		// Permanent failure — cascade to all downstream dependents.
-		s.propagateFailure(taskID)
+		// Permanent failure cascades to all downstream dependents.
+		s.propagateFailure(req.taskID)
 	}
 }
 
@@ -406,23 +554,17 @@ func (s *Scheduler) propagateFailure(rootID string) {
 			continue
 		}
 
-		// Transition from whatever state to failed.
-		switch task.Status {
-		case models.StatusPending, models.StatusReady:
-			s.metrics.pending.Add(-1)
-		case models.StatusRunning:
-			s.metrics.running.Add(-1)
+		if !s.transitionToFailed(task, true) {
+			continue
 		}
-		s.metrics.failed.Add(1)
-		task.Status = models.StatusFailed
-		task.Cancelled.Store(1) // Atomic signal for workers
-		telemetry.TasksFailedTotal.Inc()
 		// Use AppendCascadeFail so that WAL replay knows this task was killed
 		// by cascade propagation and must NOT be re-enqueued or have its retry
 		// counter incremented. The root failure is written by the worker itself
 		// via AppendFail before calling scheduler.Fail.
-		if err := s.wal.AppendCascadeFail(current); err != nil {
-			slog.Error("failed to persist cascade failure to WAL", "task_id", current, "error", err)
+		if current != rootID {
+			if err := s.wal.AppendCascadeFail(current); err != nil {
+				slog.Error("failed to persist cascade failure to WAL", "task_id", current, "error", err)
+			}
 		}
 		slog.Error("task failed permanently", "task_id", current)
 		cascadeAffected = append(cascadeAffected, current)
@@ -459,7 +601,7 @@ func (s *Scheduler) handleRetryEnqueue(taskID string) {
 	}
 }
 
-// Metrics reads atomic counters — zero blocking, safe from any goroutine.
+// Metrics reads atomic counters with zero blocking, safe from any goroutine.
 func (s *Scheduler) Metrics() (pending, running, completed, failed, retried int) {
 	return int(s.metrics.pending.Load()),
 		int(s.metrics.running.Load()),
@@ -498,16 +640,37 @@ func (s *Scheduler) Ingest(tasks []models.Task) error {
 		tasks: tasks,
 		resp:  make(chan error, 1),
 	}
-	s.ingestChan <- req
-	return <-req.resp
+	select {
+	case s.ingestChan <- req:
+	case <-s.done:
+		return ErrSchedulerStopped
+	}
+
+	select {
+	case err := <-req.resp:
+		return err
+	case <-s.done:
+		return ErrSchedulerStopped
+	}
 }
 
-func (s *Scheduler) Complete(taskID string) {
-	s.completeChan <- taskID
+func (s *Scheduler) Complete(taskID string, workerID int) bool {
+	req := taskWorkerReq{taskID: taskID, workerID: workerID}
+	select {
+	case s.completeChan <- req:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
-func (s *Scheduler) ReplayStart(taskID string) {
-	s.replayStartChan <- taskID
+func (s *Scheduler) ReplayStart(taskID string) bool {
+	select {
+	case s.replayStartChan <- taskID:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 func (s *Scheduler) handleReplayStart(taskID string) {
@@ -515,39 +678,58 @@ func (s *Scheduler) handleReplayStart(taskID string) {
 	if !exists {
 		return
 	}
-	s.metrics.pending.Add(-1)
+	if task.Status == models.StatusRunning || task.Status == models.StatusCompleted || task.Status == models.StatusFailed {
+		return
+	}
+	if task.Status == models.StatusPending || task.Status == models.StatusReady {
+		s.metrics.pending.Add(-1)
+	}
 	s.metrics.running.Add(1)
 	task.Status = models.StatusRunning
 }
 
-func (s *Scheduler) RequeueOrphans(inProgress map[string]bool) {
+func (s *Scheduler) RequeueOrphans(inProgress map[string]bool) bool {
 	req := make(chan struct{})
 	payload := struct {
 		orphans map[string]bool
 		done    chan struct{}
 	}{inProgress, req}
-	s.requeueOrphansChan <- payload
-	<-req
+	select {
+	case s.requeueOrphansChan <- payload:
+	case <-s.done:
+		return false
+	}
+	select {
+	case <-req:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 func (s *Scheduler) handleRequeueOrphans(orphans map[string]bool) {
 	for taskID := range orphans {
 		if task, exists := s.tasks[taskID]; exists {
+			if task.Status != models.StatusRunning {
+				continue
+			}
 			// Orphans were running at crash time; metrics already show
 			// them as running from handleReplayStart, move to pending.
 			s.metrics.running.Add(-1)
 			s.metrics.pending.Add(1)
-			task.Status = models.StatusReady
-			s.readyQueue.Enqueue(task)
-			s.queueSize.Add(1)
-			telemetry.CurrentQueueSize.Inc()
+			s.markReady(task)
 			slog.Info("requeued orphan task", "task_id", taskID)
 		}
 	}
 }
 
-func (s *Scheduler) ReplayComplete(taskID string) {
-	s.replayCompleteChan <- taskID
+func (s *Scheduler) ReplayComplete(taskID string) bool {
+	select {
+	case s.replayCompleteChan <- taskID:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 func (s *Scheduler) handleReplayComplete(taskID string) {
@@ -555,31 +737,40 @@ func (s *Scheduler) handleReplayComplete(taskID string) {
 	if !exists {
 		return
 	}
-	s.metrics.running.Add(-1)
-	s.metrics.completed.Add(1)
-	task.Status = models.StatusCompleted
+	if !s.transitionToCompleted(task) {
+		return
+	}
 
 	for _, depID := range s.dependents[taskID] {
 		s.inDegree[depID]--
 		if s.inDegree[depID] == 0 {
 			depTask := s.tasks[depID]
-			depTask.Status = models.StatusReady
-			s.readyQueue.Enqueue(depTask)
-			s.queueSize.Add(1)
-			telemetry.CurrentQueueSize.Inc()
+			s.markReady(depTask)
 		}
 	}
 }
 
-func (s *Scheduler) Fail(taskID string) {
-	s.failChan <- taskID
+func (s *Scheduler) Fail(taskID string, workerID int) bool {
+	req := taskWorkerReq{taskID: taskID, workerID: workerID}
+	select {
+	case s.failChan <- req:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 // ReplayFail replays a WAL FAIL record. isCascade must be true when the WAL
 // entry was written by propagateFailure (AppendCascadeFail), and false when
 // written by a worker (AppendFail). The distinction drives different replay logic.
-func (s *Scheduler) ReplayFail(taskID string, isCascade bool) {
-	s.replayFailChan <- walReplayFailReq{taskID: taskID, isCascade: isCascade}
+func (s *Scheduler) ReplayFail(taskID string, isCascade bool) bool {
+	req := walReplayFailReq{taskID: taskID, isCascade: isCascade}
+	select {
+	case s.replayFailChan <- req:
+		return true
+	case <-s.done:
+		return false
+	}
 }
 
 func (s *Scheduler) handleReplayFail(req walReplayFailReq) {
@@ -589,30 +780,28 @@ func (s *Scheduler) handleReplayFail(req walReplayFailReq) {
 	}
 
 	if req.isCascade {
-		// Cascade-killed tasks were never running — do NOT adjust the running
+		// Cascade-killed tasks were never running: do NOT adjust the running
 		// counter, do NOT increment RetryCount, do NOT re-enqueue. They must
 		// remain permanently failed exactly as they were at crash time.
-		s.metrics.failed.Add(1)
-		task.Status = models.StatusFailed
-		task.Cancelled.Store(1)
+		s.transitionToFailed(task, false)
 		return
 	}
 
-	// Organic failure: apply normal retry logic.
-	task.RetryCount++
-	if task.RetryCount >= task.MaxRetries {
-		s.metrics.running.Add(-1)
-		s.metrics.failed.Add(1)
-		task.Status = models.StatusFailed
-	} else {
+	if task.Status != models.StatusRunning {
+		return
+	}
+
+	// Organic failure: apply the same retry boundary as live execution.
+	if task.RetryCount < task.MaxRetries {
+		task.RetryCount++
 		s.metrics.running.Add(-1)
 		s.metrics.pending.Add(1)
 		s.metrics.retried.Add(1)
-		task.Status = models.StatusReady
-		s.readyQueue.Enqueue(task)
-		s.queueSize.Add(1)
-		telemetry.CurrentQueueSize.Inc()
+		s.markReady(task)
+		return
 	}
+
+	s.transitionToFailed(task, false)
 }
 
 func (s *Scheduler) QueueSize() int {
@@ -624,8 +813,16 @@ func (s *Scheduler) QueueSize() int {
 // to avoid data races. TaskInfo excludes non-copyable atomic fields.
 func (s *Scheduler) GetTaskSnapshot() map[string]TaskInfo {
 	replyCh := make(chan map[string]TaskInfo, 1)
-	s.getStateChan <- replyCh
-	return <-replyCh
+	select {
+	case s.getStateChan <- replyCh:
+	case <-s.done:
+		return map[string]TaskInfo{}
+	}
+
+	select {
+	case snap := <-replyCh:
+		return snap
+	case <-s.done:
+		return map[string]TaskInfo{}
+	}
 }
-/ /   I n c r e a s e d   b u f f e r   s i z e   t o   p r e v e n t   d r o p p i n g   W S   e v e n t s   u n d e r   l o a d  
- 
