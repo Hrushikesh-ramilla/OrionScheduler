@@ -27,6 +27,28 @@ type ingestReq struct {
 	resp  chan error
 }
 
+// walReplayFailReq carries the information needed to replay a WAL FAIL record.
+// isCascade distinguishes cascade-propagated failures from organic worker failures.
+type walReplayFailReq struct {
+	taskID    string
+	isCascade bool
+}
+
+// TaskInfo is a serializable snapshot of a task's state, safe to copy across
+// goroutine boundaries. It omits the atomic.Int32 Cancelled field which is only
+// needed by the scheduler's internal concurrency guards.
+type TaskInfo struct {
+	ID           string    `json:"id"`
+	Payload      string    `json:"payload"`
+	Priority     int       `json:"priority"`
+	Dependencies []string  `json:"dependencies"`
+	Status       string    `json:"status"`
+	RetryCount   int       `json:"retry_count"`
+	MaxRetries   int       `json:"max_retries"`
+	StartTime    time.Time `json:"start_time,omitempty"`
+	EndTime      time.Time `json:"end_time,omitempty"`
+}
+
 type Scheduler struct {
 	tasks      map[string]*models.Task
 	inDegree   map[string]int
@@ -43,15 +65,27 @@ type Scheduler struct {
 
 	replayStartChan    chan string
 	replayCompleteChan chan string
-	replayFailChan     chan string
-	requeueOrphansChan chan struct{ orphans map[string]bool; done chan struct{} }
+	replayFailChan     chan walReplayFailReq
+	requeueOrphansChan chan struct {
+		orphans map[string]bool
+		done    chan struct{}
+	}
 
-	readyChan     chan *models.Task
-	queueSize     atomic.Int64
+	readyChan chan *models.Task
+	queueSize atomic.Int64
 
 	// EventChan receives task lifecycle events for external consumers (WebSocket hub).
-	// Buffered and sent non-blocking so we never stall the event loop.
+	// Buffered 1000-deep and sent non-blocking so the event loop is never stalled.
+	// Drops are counted via droppedEvents.
 	EventChan chan models.TaskEvent
+
+	// droppedEvents counts events silently dropped when EventChan buffer is full.
+	// Exposed via DroppedEvents() and reported in /api/v1/metrics/live.
+	droppedEvents atomic.Int64
+
+	// getStateChan is used by GetTaskSnapshot to safely read task state from
+	// within the single-threaded runLoop without a data race.
+	getStateChan chan chan map[string]TaskInfo
 }
 
 func NewScheduler(wal *storage.WAL) *Scheduler {
@@ -68,24 +102,65 @@ func NewScheduler(wal *storage.WAL) *Scheduler {
 		retryChan:          make(chan string),
 		replayStartChan:    make(chan string),
 		replayCompleteChan: make(chan string),
-		replayFailChan:     make(chan string),
-		requeueOrphansChan: make(chan struct{ orphans map[string]bool; done chan struct{} }),
-		readyChan:          make(chan *models.Task),
-		EventChan:          make(chan models.TaskEvent, 100),
+		replayFailChan:     make(chan walReplayFailReq),
+		requeueOrphansChan: make(chan struct {
+			orphans map[string]bool
+			done    chan struct{}
+		}),
+		readyChan:    make(chan *models.Task),
+		EventChan:    make(chan models.TaskEvent, 1000), // 1000-deep; drops are counted.
+		getStateChan: make(chan chan map[string]TaskInfo),
 	}
 }
 
 // emitEvent sends a task event to external consumers without ever blocking
-// the scheduler event loop. If the channel buffer is full, the event is dropped.
+// the scheduler event loop. If the channel buffer is full, the event is dropped
+// and the droppedEvents counter is incremented so the drop is observable.
 func (s *Scheduler) emitEvent(event models.TaskEvent) {
 	select {
 	case s.EventChan <- event:
 	default:
+		s.droppedEvents.Add(1)
 	}
+}
+
+// DroppedEvents returns the cumulative count of events dropped due to
+// EventChan buffer saturation. An increasing counter indicates slow
+// WebSocket consumers or an undersized buffer.
+func (s *Scheduler) DroppedEvents() int64 {
+	return s.droppedEvents.Load()
 }
 
 func (s *Scheduler) Start(ctx context.Context) {
 	go s.runLoop(ctx)
+	// Emit metrics snapshots every second so the frontend charts stay live.
+	// This goroutine exits when the scheduler context is cancelled (SimulateCrash),
+	// so charts stop updating after crash and resume after recovery.
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				pending, running, completed, failed, retried := s.Metrics()
+				s.emitEvent(models.TaskEvent{
+					Type:      models.EventMetricsUpdate,
+					Timestamp: time.Now(),
+					Metadata: map[string]string{
+						"pending":        fmt.Sprintf("%d", pending),
+						"running":        fmt.Sprintf("%d", running),
+						"completed":      fmt.Sprintf("%d", completed),
+						"failed":         fmt.Sprintf("%d", failed),
+						"retried":        fmt.Sprintf("%d", retried),
+						"queue_size":     fmt.Sprintf("%d", s.QueueSize()),
+						"dropped_events": fmt.Sprintf("%d", s.DroppedEvents()),
+					},
+				})
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 }
 
 func (s *Scheduler) StartDispatch(ctx context.Context) {
@@ -137,8 +212,8 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 		case taskID := <-s.replayCompleteChan:
 			s.handleReplayComplete(taskID)
 
-		case taskID := <-s.replayFailChan:
-			s.handleReplayFail(taskID)
+		case req := <-s.replayFailChan:
+			s.handleReplayFail(req)
 
 		case req := <-s.requeueOrphansChan:
 			s.handleRequeueOrphans(req.orphans)
@@ -146,6 +221,25 @@ func (s *Scheduler) runLoop(ctx context.Context) {
 
 		case taskID := <-s.retryChan:
 			s.handleRetryEnqueue(taskID)
+
+		case replyCh := <-s.getStateChan:
+			// Safe snapshot: we are inside runLoop so no other goroutine
+			// mutates s.tasks concurrently. TaskInfo excludes atomic fields.
+			snap := make(map[string]TaskInfo, len(s.tasks))
+			for id, t := range s.tasks {
+				snap[id] = TaskInfo{
+					ID:           t.ID,
+					Payload:      t.Payload,
+					Priority:     t.Priority,
+					Dependencies: t.Dependencies,
+					Status:       t.Status,
+					RetryCount:   t.RetryCount,
+					MaxRetries:   t.MaxRetries,
+					StartTime:    t.StartTime,
+					EndTime:      t.EndTime,
+				}
+			}
+			replyCh <- snap
 
 		case <-ctx.Done():
 			return
@@ -323,7 +417,11 @@ func (s *Scheduler) propagateFailure(rootID string) {
 		task.Status = models.StatusFailed
 		task.Cancelled.Store(1) // Atomic signal for workers
 		telemetry.TasksFailedTotal.Inc()
-		if err := s.wal.AppendFail(current); err != nil {
+		// Use AppendCascadeFail so that WAL replay knows this task was killed
+		// by cascade propagation and must NOT be re-enqueued or have its retry
+		// counter incremented. The root failure is written by the worker itself
+		// via AppendFail before calling scheduler.Fail.
+		if err := s.wal.AppendCascadeFail(current); err != nil {
 			slog.Error("failed to persist cascade failure to WAL", "task_id", current, "error", err)
 		}
 		slog.Error("task failed permanently", "task_id", current)
@@ -414,7 +512,9 @@ func (s *Scheduler) ReplayStart(taskID string) {
 
 func (s *Scheduler) handleReplayStart(taskID string) {
 	task, exists := s.tasks[taskID]
-	if !exists { return }
+	if !exists {
+		return
+	}
 	s.metrics.pending.Add(-1)
 	s.metrics.running.Add(1)
 	task.Status = models.StatusRunning
@@ -422,7 +522,10 @@ func (s *Scheduler) handleReplayStart(taskID string) {
 
 func (s *Scheduler) RequeueOrphans(inProgress map[string]bool) {
 	req := make(chan struct{})
-	payload := struct{ orphans map[string]bool; done chan struct{} }{inProgress, req}
+	payload := struct {
+		orphans map[string]bool
+		done    chan struct{}
+	}{inProgress, req}
 	s.requeueOrphansChan <- payload
 	<-req
 }
@@ -449,7 +552,9 @@ func (s *Scheduler) ReplayComplete(taskID string) {
 
 func (s *Scheduler) handleReplayComplete(taskID string) {
 	task, exists := s.tasks[taskID]
-	if !exists { return }
+	if !exists {
+		return
+	}
 	s.metrics.running.Add(-1)
 	s.metrics.completed.Add(1)
 	task.Status = models.StatusCompleted
@@ -470,14 +575,30 @@ func (s *Scheduler) Fail(taskID string) {
 	s.failChan <- taskID
 }
 
-func (s *Scheduler) ReplayFail(taskID string) {
-	s.replayFailChan <- taskID
+// ReplayFail replays a WAL FAIL record. isCascade must be true when the WAL
+// entry was written by propagateFailure (AppendCascadeFail), and false when
+// written by a worker (AppendFail). The distinction drives different replay logic.
+func (s *Scheduler) ReplayFail(taskID string, isCascade bool) {
+	s.replayFailChan <- walReplayFailReq{taskID: taskID, isCascade: isCascade}
 }
 
-func (s *Scheduler) handleReplayFail(taskID string) {
-	task, exists := s.tasks[taskID]
-	if !exists { return }
+func (s *Scheduler) handleReplayFail(req walReplayFailReq) {
+	task, exists := s.tasks[req.taskID]
+	if !exists {
+		return
+	}
 
+	if req.isCascade {
+		// Cascade-killed tasks were never running — do NOT adjust the running
+		// counter, do NOT increment RetryCount, do NOT re-enqueue. They must
+		// remain permanently failed exactly as they were at crash time.
+		s.metrics.failed.Add(1)
+		task.Status = models.StatusFailed
+		task.Cancelled.Store(1)
+		return
+	}
+
+	// Organic failure: apply normal retry logic.
 	task.RetryCount++
 	if task.RetryCount >= task.MaxRetries {
 		s.metrics.running.Add(-1)
@@ -498,4 +619,11 @@ func (s *Scheduler) QueueSize() int {
 	return int(s.queueSize.Load())
 }
 
-
+// GetTaskSnapshot returns a serializable snapshot of all tasks and their
+// current status. The snapshot is built inside runLoop via a channel handshake
+// to avoid data races. TaskInfo excludes non-copyable atomic fields.
+func (s *Scheduler) GetTaskSnapshot() map[string]TaskInfo {
+	replyCh := make(chan map[string]TaskInfo, 1)
+	s.getStateChan <- replyCh
+	return <-replyCh
+}
