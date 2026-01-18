@@ -3,7 +3,7 @@
 import { Handle, Position, NodeProps } from "reactflow";
 import { cn } from "@/lib/utils";
 import { TaskStatus } from "@/types";
-import { Clock, AlertTriangle, CheckCircle, Play, Loader2, RefreshCcw } from "lucide-react";
+import { Clock, AlertTriangle, CheckCircle, Play, Loader2, RefreshCcw, Skull } from "lucide-react";
 
 export type TaskNodeData = {
   label: string;
@@ -43,6 +43,15 @@ const statusConfig: Record<TaskStatus, { color: string; border: string; bg: stri
     border: "border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.2)]",
     bg: "bg-amber-500/10",
     icon: <RefreshCcw className="w-4 h-4 animate-spin text-amber-500" />
+  },
+  // Cascade-failed: orange, distinct from organic red 'failed'.
+  // A Skull icon signals this task was killed by upstream propagation, not by
+  // its own error — the invariant that cascade ≠ organic is visible in the UI.
+  "cascade-failed": {
+    color: "text-orange-500",
+    border: "border-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.4)]",
+    bg: "bg-orange-500/10",
+    icon: <Skull className="w-4 h-4 text-orange-500" />
   }
 };
 
