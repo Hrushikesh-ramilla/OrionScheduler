@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -14,7 +15,11 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins; tighten via CORS in production
+		allowedOrigin := os.Getenv("WS_ORIGIN")
+		if allowedOrigin == "" {
+			return true
+		}
+		return r.Header.Get("Origin") == allowedOrigin
 	},
 }
 

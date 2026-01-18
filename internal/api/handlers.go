@@ -1,6 +1,6 @@
-// Package api implements the HTTP REST interface for the Distributed
-// Task Orchestrator. It exposes endpoints for submitting DAGs and
-// querying system status.
+// Package api implements the HTTP REST interface for the single-node
+// DAG scheduler. It exposes endpoints for submitting DAGs and querying
+// system status.
 package api
 
 import (
@@ -17,7 +17,7 @@ import (
 	"go-enterprise-scheduler/internal/engine"
 	"go-enterprise-scheduler/internal/storage"
 	"go-enterprise-scheduler/pkg/models"
-	
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/time/rate"
 )
@@ -80,12 +80,12 @@ func NewHandler(manager *engine.SchedulerManager, wal *storage.WAL, idemStore *I
 	// GET /ws — WebSocket endpoint for real-time event streaming
 	mux.HandleFunc("/ws", hub.HandleWS)
 
-	return corsMiddleware(mux)
+	return CORSMiddleware(mux)
 }
 
-// corsMiddleware adds CORS headers to all responses. In development,
+// CORSMiddleware adds CORS headers to all responses. In development,
 // it allows all origins. In production, set CORS_ORIGIN env var.
-func corsMiddleware(next http.Handler) http.Handler {
+func CORSMiddleware(next http.Handler) http.Handler {
 	allowOrigin := os.Getenv("CORS_ORIGIN")
 	if allowOrigin == "" {
 		allowOrigin = "*"
@@ -94,7 +94,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Orion-Admin-Token, Authorization")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -373,7 +373,7 @@ func (h *Handler) handleMetricsLive(w http.ResponseWriter, r *http.Request) {
 		"queue_size":     queueSize,
 		"ws_clients":     wsClients,
 		"uptime_seconds": int(time.Since(serverStartTime).Seconds()),
-		"workers":        4, // matches DefaultWorkerCount
+		"workers":        h.manager.WorkerCount(),
 		"dropped_events": sched.DroppedEvents(),
 	}
 
@@ -399,18 +399,42 @@ func (h *Handler) handleDAGState(w http.ResponseWriter, r *http.Request) {
 
 	sched := h.manager.Scheduler()
 	if sched == nil {
-		// Scheduler is offline (crashed). Return empty state — frontend can
-		// detect this and show the correct offline UI.
+		// Scheduler is offline (crashed). Return explicit metadata so the
+		// frontend can distinguish offline state from an empty DAG.
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"tasks": map[string]interface{}{}})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"tasks":             map[string]interface{}{},
+			"scheduler_running": false,
+			"queue_size":        0,
+			"metrics": map[string]int{
+				"pending":   0,
+				"running":   0,
+				"completed": 0,
+				"failed":    0,
+				"retried":   0,
+			},
+			"server_time": time.Now(),
+		})
 		return
 	}
 
 	snap := sched.GetTaskSnapshot()
+	pending, running, completed, failed, retried := sched.Metrics()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"tasks": snap,
+		"tasks":             snap,
+		"scheduler_running": true,
+		"queue_size":        sched.QueueSize(),
+		"dropped_events":    sched.DroppedEvents(),
+		"metrics": map[string]int{
+			"pending":   pending,
+			"running":   running,
+			"completed": completed,
+			"failed":    failed,
+			"retried":   retried,
+		},
+		"server_time": time.Now(),
 	})
 }
 
@@ -448,13 +472,24 @@ func validateDAG(tasks []models.Task) error {
 	dependents := make(map[string][]string)
 
 	for i := range tasks {
+		if tasks[i].ID == "" {
+			return fmt.Errorf("task ID is required")
+		}
+		if nodes[tasks[i].ID] {
+			return fmt.Errorf("duplicate task ID %q", tasks[i].ID)
+		}
 		nodes[tasks[i].ID] = true
 		inDegree[tasks[i].ID] = 0
 	}
 
 	// Check dependencies exist and build in-degree counts.
 	for i := range tasks {
+		seenDeps := make(map[string]bool, len(tasks[i].Dependencies))
 		for _, dep := range tasks[i].Dependencies {
+			if seenDeps[dep] {
+				return fmt.Errorf("task %q has duplicate dependency %q", tasks[i].ID, dep)
+			}
+			seenDeps[dep] = true
 			if !nodes[dep] {
 				return fmt.Errorf("task %q depends on unknown task %q", tasks[i].ID, dep)
 			}

@@ -1,4 +1,4 @@
-// Distributed Task Orchestrator — main.go
+// OrionScheduler — main.go
 //
 // This is the entry point for the go-enterprise-scheduler server.
 // It wires together the storage layer (WAL), the DAG scheduling engine,
@@ -76,14 +76,12 @@ func main() {
 	dagStore := engine.NewDAGStore()
 	handler := api.NewHandler(manager, wal, idemStore, wsHub, dagStore)
 
-	// Register admin endpoints (crash/recover) on the same mux.
-	// We need access to the underlying mux — for now, create admin
-	// handler separately and it registers on NewHandler's mux.
+	// Register admin endpoints (crash/recover) alongside the public API.
 	adminHandler := api.NewAdminHandler(manager, wsHub)
 
 	// Build a top-level mux that delegates to both API and admin.
 	rootMux := http.NewServeMux()
-	rootMux.Handle("/admin/", adminHandler.Mux())
+	rootMux.Handle("/admin/", api.CORSMiddleware(adminHandler.Mux()))
 	rootMux.Handle("/", handler)
 
 	port := os.Getenv("PORT")
