@@ -14,3 +14,9 @@ server_*
 debug_*
 load_*
 README.md
+frontend/node_modules
+frontend/.next
+frontend/.vercel
+frontend/out
+frontend/npm-debug.log*
+frontend/yarn-error.log*
