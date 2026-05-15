@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ORION // Crash-Consistent DAG Scheduler",
+  title: "Orion",
   description: "Real-time DAG execution engine with crash-consistent WAL recovery, priority scheduling, and live system observability.",
   keywords: ["DAG", "Scheduler", "Go", "Write-Ahead Log", "Crash Recovery", "Kahn's Algorithm"],
 };
