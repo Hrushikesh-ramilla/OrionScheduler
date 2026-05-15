@@ -1,95 +1,172 @@
-@import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 2px;
+  }
+  .font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace !important;
+  }
+  .panel-border {
+    border: 1px solid hsl(var(--border));
+  }
+  .glow-blue {
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4), inset 0 0 12px rgba(59, 130, 246, 0.05);
+  }
+  .glow-emerald {
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4), inset 0 0 12px rgba(16, 185, 129, 0.05);
+  }
+  .glow-red {
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.5), inset 0 0 12px rgba(239, 68, 68, 0.08);
+  }
+  .glow-amber {
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4), inset 0 0 12px rgba(245, 158, 11, 0.05);
+  }
+  .glow-orange {
+    box-shadow: 0 0 12px rgba(249, 115, 22, 0.4), inset 0 0 12px rgba(249, 115, 22, 0.05);
+  }
+  .scanline {
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+    pointer-events: none;
+  }
+  .data-pulse {
+    animation: dataPulse 2s ease-in-out infinite;
+  }
+  @keyframes dataPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .crash-flash {
+    animation: crashFlash 0.5s ease-in-out 3;
+  }
+  @keyframes crashFlash {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
 }
 
 @layer base {
-  .theme {
-    --font-heading: var(--font-sans);
-    --font-sans: var(--font-sans);
-  }
   :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --background: 220 25% 6%;
+    --foreground: 210 20% 92%;
+    --card: 220 22% 9%;
+    --card-foreground: 210 20% 92%;
+    --popover: 220 22% 9%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 220 25% 6%;
+    --secondary: 220 18% 14%;
+    --secondary-foreground: 210 20% 92%;
+    --muted: 220 18% 14%;
+    --muted-foreground: 215 15% 52%;
+    --accent: 220 18% 16%;
+    --accent-foreground: 210 20% 92%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 20% 92%;
+    --border: 220 15% 18%;
+    --input: 220 15% 18%;
+    --ring: 217 91% 60%;
+    --radius: 0.25rem;
+
+    /* System-specific semantic tokens */
+    --sys-online: 152 69% 42%;
+    --sys-offline: 0 72% 51%;
+    --sys-warning: 38 92% 50%;
+    --sys-running: 217 91% 60%;
+    --sys-cascade: 25 95% 53%;
+    --sys-panel-bg: 220 22% 9%;
+    --sys-panel-header: 220 20% 12%;
+    --sys-code-bg: 220 25% 5%;
   }
-  .dark {
-    --background: oklch(0.12 0.02 260);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.16 0.02 260);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.16 0.02 260);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.65 0.15 250);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.22 0.03 260);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.22 0.03 260);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.22 0.03 260);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.65 0.2 20);
-    --border: oklch(0.25 0.04 260);
-    --input: oklch(0.25 0.04 260);
-    --ring: oklch(0.65 0.15 250);
-    --chart-1: oklch(0.65 0.15 250);
-    --chart-2: oklch(0.72 0.12 200);
-    --chart-3: oklch(0.85 0.1 160);
-    --chart-4: oklch(0.55 0.15 300);
-    --chart-5: oklch(0.80 0.15 10);
-    --sidebar: oklch(0.14 0.02 260);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.65 0.15 250);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.22 0.03 260);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(0.25 0.04 260);
-    --sidebar-ring: oklch(0.65 0.15 250);
-  }
+
   * {
-    @apply border-border outline-ring;
+    @apply border-border;
+    box-sizing: border-box;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.5;
     scrollbar-gutter: stable;
+    overflow: hidden;
   }
+
   html {
-    @apply font-sans;
+    font-size: 12px;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Ensure full viewport usage */
+  #__next, main {
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* Custom React Flow theme overrides */
+  .react-flow__background {
+    background-color: hsl(var(--background)) !important;
+  }
+  .react-flow__background pattern rect {
+    fill: hsl(var(--border)) !important;
+    opacity: 0.4;
+  }
+  .react-flow__controls {
+    background: hsl(var(--card)) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: none !important;
+  }
+  .react-flow__controls-button {
+    background: transparent !important;
+    border: none !important;
+    color: hsl(var(--muted-foreground)) !important;
+  }
+  .react-flow__controls-button:hover {
+    background: hsl(var(--accent)) !important;
+    color: hsl(var(--foreground)) !important;
+  }
+  .react-flow__minimap {
+    background: hsl(var(--card)) !important;
+    border: 1px solid hsl(var(--border)) !important;
+    border-radius: var(--radius) !important;
+  }
+  .react-flow__edge-path {
+    stroke-width: 1.5;
+  }
+  .react-flow__edge.animated path {
+    stroke-dasharray: 5;
+    animation: dashdraw 0.5s linear infinite;
+  }
+  @keyframes dashdraw {
+    to { stroke-dashoffset: -10; }
   }
 }
