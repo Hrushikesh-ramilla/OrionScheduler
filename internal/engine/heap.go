@@ -1,5 +1,5 @@
 // Package engine implements the core scheduling and execution components
-// of the Distributed Task Orchestrator. This file provides a Min-Heap
+// of the single-node DAG scheduler. This file provides a Min-Heap
 // priority queue backed by Go's container/heap interface.
 package engine
 
