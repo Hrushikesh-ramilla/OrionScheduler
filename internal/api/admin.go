@@ -1,9 +1,12 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"go-enterprise-scheduler/internal/engine"
@@ -41,6 +44,9 @@ func (a *AdminHandler) handleCrash(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
+	if !authorizedAdminDemoRequest(w, r) {
+		return
+	}
 
 	if !a.manager.IsRunning() {
 		http.Error(w, `{"error":"scheduler is already stopped"}`, http.StatusConflict)
@@ -65,6 +71,9 @@ func (a *AdminHandler) handleCrash(w http.ResponseWriter, r *http.Request) {
 func (a *AdminHandler) handleRecover(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if !authorizedAdminDemoRequest(w, r) {
 		return
 	}
 
@@ -106,4 +115,25 @@ func (a *AdminHandler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func authorizedAdminDemoRequest(w http.ResponseWriter, r *http.Request) bool {
+	expected := os.Getenv("ADMIN_TOKEN")
+	if expected == "" {
+		return true
+	}
+
+	got := r.Header.Get("X-Orion-Admin-Token")
+	if got == "" {
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			got = strings.TrimPrefix(auth, "Bearer ")
+		}
+	}
+	if subtle.ConstantTimeCompare([]byte(got), []byte(expected)) == 1 {
+		return true
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	http.Error(w, `{"error":"admin demo token required"}`, http.StatusUnauthorized)
+	return false
 }
